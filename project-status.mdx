@@ -1,0 +1,51 @@
+---
+title: "Project Status & Scope"
+description: "An honest boundary between what Sportz has, what's wired but inactive, and what doesn't exist yet."
+---
+
+This page exists so the handbook never lies to you. Documentation that describes systems which don't exist is worse than no documentation — it sends maintainers chasing ghosts. Here is the exact line between reality and aspiration.
+
+## ✅ Built and working
+
+- **REST API** — `GET/POST /matches`, `GET/POST /matches/:id/commentary`
+- **WebSocket server** — connect, subscribe/unsubscribe to a match, broadcast match-created and commentary events, 30s heartbeat
+- **Database** — Neon Postgres via Drizzle ORM; `matches` and `commentary` tables with a FK cascade
+- **Validation** — every request body/query parsed with Zod
+- **Security middleware** — Arcjet (rate limiting, bot detection, shield) on HTTP and WS upgrade; Helmet headers; CORS
+- **Match status** — derived from `startTime`/`endTime` (scheduled → live → finished)
+- **Tests** — 95 Vitest tests: unit (validation, status), integration (routes against real Postgres), WebSocket (real socket pairs)
+- **CI/CD** — three GitHub Actions workflows (lint+format, tests, docker build/push)
+- **Containerization** — multi-stage Dockerfile, dev (Neon Local) and prod compose files
+- **Deploy** — Render Blueprint (Docker runtime)
+- **Frontend** — Next.js App Router app: match grid, commentary timeline, dark mode, animations, responsive bottom sheet, modals, skeletons
+
+## 🟡 Wired but not yet active
+
+- **Frontend observability** — Sentry, PostHog, and New Relic Browser are all integrated in code, but inert until their keys are filled into `.env.local`. See [Observability](/operations/observability).
+
+## ❌ Not built (and this handbook will not pretend otherwise)
+
+These appear in the original handbook brief but **do not exist in Sportz**. They are documented here as deliberate non-goals or future work, not as fiction.
+
+| Area | Reality | Why it's absent / what it would take |
+|---|---|---|
+| **Authentication** | None | Sportz is a read-heavy public broadcast demo. No user accounts exist. Adding it = an auth provider (e.g. Clerk/Auth.js) + a `users` table + middleware. |
+| **Authorization** | None | No roles, no protected resources. Follows from no auth. |
+| **Redis / caching** | None | React Query caches on the client; the DB is fast enough at current scale. A cache layer is a [scale-stage](/project-status#when-these-become-real) concern, not a today concern. |
+| **Message queue** | None | Broadcasts are synchronous in-process function calls. A queue (e.g. Redis Streams, Kafka) only matters when you have multiple API instances — see below. |
+| **Microservices** | Monolith | One Express process serves REST + WS. Correct for this scale; splitting would add ops cost for no benefit yet. |
+| **Zustand / Redux** | Not used | State lives in React Query cache + local component state. A global store wasn't needed for one page. |
+| **React Hook Form** | Not used | The UI has no complex forms; it consumes data, it doesn't capture much. |
+| **Server Components / streaming** | Not used | The app is interactive and WebSocket-driven, so components are client components (`'use client'`). SSR/streaming would fight the real-time model. |
+
+## When these become real
+
+The absent items aren't permanent gaps — they're correctly deferred until scale demands them. The [Scalability](/architecture/system) reasoning:
+
+- **Multiple API instances** → in-process broadcast breaks (a client connected to instance A won't get an event created on instance B). *That's* when a queue/pub-sub (Redis) becomes necessary — not before.
+- **User accounts / personalization** → auth + authz become necessary.
+- **Read-heavy hot paths** → a cache layer becomes worthwhile, measured first.
+
+<Warning>
+If you are a future maintainer and you find one of the "Not built" items has since been added — update this table. The value of this page is entirely in it staying honest.
+</Warning>

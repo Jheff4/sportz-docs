@@ -1,0 +1,60 @@
+---
+title: "API Reference"
+description: "REST endpoints and the WebSocket protocol."
+---
+
+Base URL (local): `http://localhost:8000` · WebSocket: `ws://localhost:8000/ws`
+
+## REST
+
+### `GET /matches`
+
+Returns matches, most-recent first.
+
+**Query** — `limit` (1–100, default 50).
+
+```json
+{ "data": [
+  { "id": 1, "sport": "football", "homeTeam": "Arsenal", "awayTeam": "Chelsea",
+    "status": "live", "startTime": "2026-06-16T15:00:00.000Z", "endTime": "2026-06-16T17:00:00.000Z",
+    "homeScore": 2, "awayScore": 1, "createdAt": "2026-06-16T14:55:00.000Z" } 
+] }
+```
+
+### `POST /matches`
+
+Creates a match. `status` is **derived** from `startTime`/`endTime`, not supplied. Broadcasts `match_created` to all WS clients.
+
+**Body** — `sport`, `homeTeam`, `awayTeam`, `startTime` (ISO), `endTime` (ISO, must be after `startTime`); optional `homeScore`, `awayScore` (default 0). → `201 { data }`, or `400` on invalid input.
+
+### `GET /matches/:id/commentary`
+
+Returns a match's commentary, most-recent first. **Query** — `limit` (1–100). → `200 { data }`, `400` on bad id/query.
+
+### `POST /matches/:id/commentary`
+
+Inserts a commentary event, broadcasts `commentary` to subscribers of that match.
+
+**Body** — required `sequence` (positive int), `eventType`, `message`; optional `minute`, `period`, `actor`, `team`, `tags`, `metadata`. → `201 { data }`, `400` on invalid input.
+
+<Warning>
+Posting to a **non-existent** match currently returns `500` (foreign-key violation), not `404`. Known gap — see [ISSUE-004](/issues).
+</Warning>
+
+## WebSocket protocol
+
+Connect to `/ws`. Full walkthrough in [Real-Time Deep Dive](/architecture/realtime).
+
+| Direction | Message |
+|---|---|
+| S→C | `{ "type": "welcome" }` |
+| C→S | `{ "type": "subscribe", "matchId": 1 }` |
+| S→C | `{ "type": "subscribed", "matchId": 1 }` |
+| C→S | `{ "type": "unsubscribe", "matchId": 1 }` |
+| S→C | `{ "type": "match_created", "data": { ...match } }` (all clients) |
+| S→C | `{ "type": "commentary", "data": { ...event } }` (match subscribers only) |
+| S→C | `{ "type": "error", "message": "Invalid JSON" }` |
+
+<Note>
+This is hand-written from the route code. A future improvement is generating an **OpenAPI spec** from the existing Zod schemas (`zod-to-openapi`), making the validation rules the single source of truth for these docs — and enabling an interactive playground.
+</Note>

@@ -1,0 +1,60 @@
+---
+title: "Testing Strategy"
+description: "What we test, how, and why — 95 tests across unit, integration, and WebSocket layers."
+---
+
+Sportz has **95 tests** (Vitest), split across three layers. Each layer answers a different question and runs against a different level of realness.
+
+## The test pyramid, as built
+
+| Layer | Count (approx) | Runs against | Answers |
+|---|---|---|---|
+| **Unit** | ~55 | Pure functions, in memory | "Does this logic compute the right value?" |
+| **Integration** | ~27 | A **real** Postgres + the real Express app | "Do the routes, validation, and DB work together?" |
+| **WebSocket** | ~12 | A **real** WS server + real client sockets | "Does the live protocol behave correctly?" |
+
+## Unit tests — validation & status logic
+
+The pure functions: `getMatchStatus` (derives scheduled/live/finished from timestamps, including boundary cases like "now exactly equals start") and the Zod schemas (valid + invalid inputs, coercion, the `endTime > startTime` rule). No DB, no network — fast and deterministic.
+
+## Integration tests — routes against real Postgres
+
+These drive the real Express app with **Supertest**, against a **real** database (not a mock). Mocking the DB would mean testing the mock, not the SQL.
+
+- `createApp()` is built *without* `server.listen()` so Supertest can drive it in-memory (see [Backend](/architecture/backend)).
+- `resetDb()` runs `TRUNCATE ... RESTART IDENTITY CASCADE` in a `beforeEach`, so every test gets a clean, deterministic database with IDs starting at 1.
+- The WS broadcast functions are replaced with `vi.fn()` spies to assert the route *calls* them correctly — without needing a live socket.
+
+**The one thing mocked:** Arcjet. Its `protect()` makes a real network call; a setup file (`tests/setup/mock-arcjet.ts`) mocks it to always allow (and sets test env vars before any import, because `arcjet.ts` throws at import time if `ARCJET_KEY` is missing).
+
+## WebSocket tests — real socket pairs
+
+These start a real `http.Server` on port 0 (OS-assigned free port), attach the real WS server, and connect real `ws` clients. They verify: welcome on connect, subscribe/unsubscribe confirmations, malformed-JSON handling, **room-scoped broadcast** (subscribers of match 1 get it, subscribers of match 2 and unsubscribed clients don't), and the Arcjet deny path (overriding the global mock for one call).
+
+Two real bugs were found *by writing these tests* — a message race and a missing `close()` causing hung timers. Both are post-mortemed in [Issues](/issues).
+
+## Running the tests
+
+```bash
+# Unit + WebSocket — no database needed
+npx vitest run tests/unit tests/ws
+
+# Full suite — needs a Postgres. Spin up the throwaway container:
+docker run -d --name sportz-test-db \
+  -e POSTGRES_USER=sportz_test -e POSTGRES_PASSWORD=sportz_test \
+  -e POSTGRES_DB=sportz_test -p 5432:5432 postgres:16-alpine
+DATABASE_URL="postgresql://sportz_test:sportz_test@localhost:5432/sportz_test" npm run db:migrate
+npm test
+
+# Coverage
+npm run test:coverage
+```
+
+CI runs the full suite against a `postgres:16-alpine` **service container** — fast, free, deterministic, and identical to the local throwaway DB. See [DevOps](/operations/devops).
+
+## Not yet built
+
+- **E2E (Playwright)** on the frontend — planned; the highest-value next addition.
+- **Contract testing** between frontend and backend types.
+- **Load testing** (k6/Artillery) of the WS server under thousands of concurrent subscribers — relevant before any real scale.
+- **Visual regression** — relevant once the UI stabilizes.

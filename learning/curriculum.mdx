@@ -1,0 +1,60 @@
+---
+title: "Learning Curriculum"
+description: "Each core technology in Sportz, explained at four levels — beginner to staff."
+---
+
+This section teaches the technologies *through* Sportz. Each tech is leveled: **Beginner** (what it is), **Intermediate** (how we use it), **Senior** (the tradeoffs), **Staff** (when it breaks and what's next).
+
+---
+
+## WebSockets
+
+- **Beginner.** A persistent two-way connection between browser and server. Unlike HTTP (request → response → done), it stays open so the server can push data without being asked.
+- **Intermediate.** Sportz shares one HTTP server between Express and `ws` via an `upgrade` listener. Clients subscribe to a match "room"; the server broadcasts only to that room's subscribers.
+- **Senior.** Why not SSE or polling? SSE is one-way (no client→server subscribe); polling is high-latency and wasteful. We hand-rolled rooms/heartbeat/reconnect instead of Socket.IO to keep the dependency surface small — accepting that we own that code. (See [ADR-002](/decisions).)
+- **Staff.** The subscription registry is in-process memory. At multi-instance scale a client on instance A misses events from instance B; you need a Redis pub/sub backbone. Know *when* that becomes mandatory (horizontal scaling) vs premature ([System Architecture](/architecture/system)).
+
+---
+
+## TanStack Query
+
+- **Beginner.** A library that fetches and caches server data, giving you loading/error states for free.
+- **Intermediate.** Sportz keys queries by `['matches']` and `['commentary', matchId]`. `enabled: matchId !== null` stops the commentary query firing until a match is selected.
+- **Senior.** The key move: WebSocket events write into the *same* cache via `setQueryData`, so REST and live data share one source of truth — no reconciliation layer. Replaced ~50 lines of hand-rolled `useState`/`useEffect`/AbortController per hook. ([ADR-003](/decisions).)
+- **Staff.** Know the cache-invalidation model and `staleTime` tradeoffs; understand why `refetchOnWindowFocus` is off here (WS already keeps data live, so refocus refetches would be redundant work).
+
+---
+
+## Docker & multi-stage builds
+
+- **Beginner.** Packages your app + its environment into one portable image that runs the same everywhere.
+- **Intermediate.** Sportz uses a `builder` stage (compiles TypeScript) and a `runner` stage (ships only `dist/` + prod deps, runs as non-root). The final image has no compiler or source.
+- **Senior.** Why multi-stage? Smaller image, lower attack surface, no devDeps in production. Why a non-root user? Limits blast radius — but it means runtime-written paths need explicit `chown` (a real crash, [ISSUE-002](/issues)).
+- **Staff.** Layer caching strategy (copy `package*.json` before source so `npm ci` caches), multi-arch builds (amd64 + arm64), and the dev/prod parity story (Neon Local vs Neon Cloud).
+
+---
+
+## TypeScript
+
+- **Beginner.** JavaScript with types checked before the code runs.
+- **Intermediate.** Sportz shares data shapes across backend and frontend; the frontend mirrors Drizzle-inferred types.
+- **Senior.** The payoff is concentrated at boundaries — the WebSocket message protocol and API contracts — where a wrong shape is easy to introduce and expensive to debug at runtime. ([ADR-001](/decisions).)
+- **Staff.** Trade strictness against velocity; know where types earn their keep (contracts, public APIs) vs where they're ceremony.
+
+---
+
+## Drizzle + Neon
+
+- **Beginner.** Drizzle is a type-safe query builder; Neon is serverless Postgres.
+- **Intermediate.** Schema in `schema.ts`, parameterized queries, FK cascade from `commentary` → `matches`. Neon Local forks an ephemeral branch per dev run.
+- **Senior.** The SSL strategy has three cases (Cloud verified / Local self-signed / plain Postgres off) — `ssl: false` ≠ `{ rejectUnauthorized: false }` (a real bug, [ISSUE-003](/issues)). Pooled vs direct connections matter for serverless.
+- **Staff.** Connection-pool sizing under serverless, migration strategy in CI/CD, and read-replica/caching decisions at scale.
+
+---
+
+## Observability (Sentry / PostHog / New Relic)
+
+- **Beginner.** Tools that tell you, respectively, *what broke*, *what users did*, and *how fast it ran*.
+- **Intermediate.** All three are wired into the frontend as providers; New Relic is lazy-loaded after hydration so it doesn't hurt the metric it measures.
+- **Senior.** Three pillars — logs, metrics, traces. Sportz has logs (Winston) and frontend RUM wired; backend metrics/tracing are gaps. ([Observability](/operations/observability).)
+- **Staff.** OpenTelemetry as the vendor-neutral path — one trace from browser click → Express route → Neon query. Knowing what to measure, thresholds, and escalation.

@@ -1,0 +1,176 @@
+---
+title: "Senior Engineer Interview Prep"
+description: "Comprehensive Q&A across every domain in Sportz — frontend, backend, real-time, data, DevOps, security, observability, scaling, and architecture."
+---
+
+Every question is answerable from how Sportz actually works, with a model answer. Organized by domain so you can drill the area you're weakest in. Rehearse explaining *your own system* under pressure.
+
+## Frontend
+
+<AccordionGroup>
+<Accordion title="Why are nearly all components client components ('use client') despite using the App Router?">
+Sportz is interactive and WebSocket-driven — the client holds a live socket and continuously mutates state. Server Components and streaming shine for content that renders once on the server; they'd fight a model where the client is the source of live truth. So the App Router is used for routing/layout, but the interactive surface is client components. This is a deliberate fit-to-purpose choice, not a missed optimization.
+</Accordion>
+<Accordion title="Why React Query instead of useState + useEffect + fetch?">
+The manual version (which existed first) reimplements caching, loading/error state, dedup, and AbortController by hand — and still needs a separate path to merge WebSocket updates. React Query gives all of that, and crucially lets WS events write into the same cache via setQueryData, unifying fetched and live data into one source of truth. It deleted ~50 lines of plumbing per hook.
+</Accordion>
+<Accordion title="How does React.memo with a custom comparator help MatchCard, and why is the comparator custom?">
+When any match updates (a WS score change), the parent re-renders and passes new props to all cards. Without memo, all 6 cards re-render though one changed. The custom comparator checks only the fields that affect output (id, scores, status, isActive, index), so a card re-renders only when its own data changes — ~60% fewer renders during an active match. A default shallow compare wouldn't capture the right subset cleanly.
+</Accordion>
+<Accordion title="What's the orchestrator pattern in page.tsx and why not Context or Zustand?">
+page.tsx owns activeMatchId and wires the three hooks (useWebSocket, useMatches, useCommentary) together because they depend on each other through that shared pivot. Context would re-render every consumer on any change; Zustand is global-store overhead for a single page. For one page with one shared pivot, an orchestrator component is the simplest correct choice. The documented next step (if it grows) is a useSportzApp() hook, then a store — in that order.
+</Accordion>
+<Accordion title="Why does the theme toggle need a 'mounted' guard?">
+next-themes resolves the actual theme from localStorage, which only exists on the client. During SSR the server doesn't know the user's preference, so rendering the toggle immediately causes a hydration mismatch / flash of wrong icon. The mounted guard withholds the toggle until the client has resolved the real theme.
+</Accordion>
+<Accordion title="What's your rule for animations not causing jank, and why?">
+Only animate transform and opacity — they're GPU-composited and don't trigger layout/paint. Never animate width/height/top/left. Continuous animations (the live pulse) use CSS, not Framer Motion, so they don't hold a requestAnimationFrame loop for the whole session. And useReducedMotion disables motion for users who request it (an accessibility requirement, not optional).
+</Accordion>
+<Accordion title="AnimatePresence with mode='popLayout' on the score — what problem does it solve?">
+When a score changes, the old number must exit while the new one enters. popLayout removes the exiting element from layout flow immediately so the entering one doesn't cause a layout shift / both occupying space. The `key={score}` is what tells AnimatePresence an element left and another arrived.
+</Accordion>
+</AccordionGroup>
+
+## Backend
+
+<AccordionGroup>
+<Accordion title="Why is createApp() separate from server.listen()?">
+Testability. Supertest drives the Express app object in-memory without binding a port. If construction and listen lived in one file, importing it from a test would start a real server as a side effect and two test files would collide on the port. Separating "build the app" from "run the app" makes the whole route layer testable.
+</Accordion>
+<Accordion title="How do REST routes trigger a WebSocket broadcast without importing the WS module?">
+attachWebSocketServer() returns broadcast functions that index.ts injects onto app.locals. Routes call res.app.locals.broadcastCommentary(...) behind an existence check. This decouples the route layer from the WS layer — the route just says "something happened," and the seam connects it to "tell the clients."
+</Accordion>
+<Accordion title="Walk the order of gates in the request lifecycle and why that order.">
+Security (Arcjet) → validation (Zod) → persistence (Drizzle) → broadcast. A request failing Arcjet never touches Zod; one failing Zod never touches the DB. Each layer is a gate that rejects bad traffic as early and cheaply as possible.
+</Accordion>
+<Accordion title="How is match status determined, and why isn't it stored from user input?">
+getMatchStatus derives scheduled/live/finished from startTime/endTime relative to now. Storing a user-supplied status would let it drift out of sync with the clock (a 'live' match whose endTime passed). Deriving it makes the timestamps the single source of truth.
+</Accordion>
+<Accordion title="What happens on SIGTERM today, and what's the gap?">
+The process exits immediately, dropping in-flight WS connections uncleanly — no graceful shutdown. attachWebSocketServer now returns close() (stops the heartbeat interval, closes the server) as the building block; a proper SIGTERM handler would stop accepting connections, call close(), drain HTTP, close the DB pool, then exit. Client reconnect-with-backoff currently masks this for users.
+</Accordion>
+</AccordionGroup>
+
+## Real-time / WebSockets
+
+<AccordionGroup>
+<Accordion title="Why WebSockets instead of polling or SSE?">
+Polling is high-latency and wasteful at live-sport cadence. SSE is server→client only — Sportz needs client→server (subscribe/unsubscribe to specific matches). WebSockets are bidirectional and persistent. Raw ws over Socket.IO keeps the dependency surface small, at the cost of hand-rolling rooms/heartbeat/reconnect.
+</Accordion>
+<Accordion title="Why is match_created global but commentary room-scoped?">
+A new match should appear in everyone's grid (global broadcast to all clients). Commentary only matters to clients watching that match (scoped via the `matchSubscribers` map: `matchId → Set<socket>`). Sending all commentary to all clients would waste bandwidth and leak unrelated matches.
+</Accordion>
+<Accordion title="How does reconnection work, and why exponential backoff?">
+On close, the client retries with delays of 2s, 4s, 8s… capped at 30s, giving up after 10 attempts. Exponential backoff avoids hammering a server that's down (which a fixed short interval would do, worsening an outage) while still recovering quickly from a brief blip.
+</Accordion>
+<Accordion title="What's the heartbeat for and why must its interval be cleared on close?">
+A client can vanish without a clean close (laptop sleeps). The server pings every 30s and terminates sockets that didn't pong — killing ghost connections that would otherwise leak memory (each holds a subscription Set). The interval must be cleared by close() or it keeps the process alive (which hung the test suite — ISSUE-001's sibling).
+</Accordion>
+<Accordion title="A goal is scored — trace it end to end.">
+POST /matches/:id/commentary → Arcjet → Zod → Drizzle insert returning the row → broadcastCommentary(matchId, row) → WS looks up that match's subscriber Set, sends only to them → client onmessage → onCommentary → setQueryData prepends to ['commentary', matchId] → new CommentaryEvent animates in (y:12→0). Unsubscribed clients get nothing.
+</Accordion>
+</AccordionGroup>
+
+## Database
+
+<AccordionGroup>
+<Accordion title="Explain the three SSL cases in db.ts.">
+Neon Cloud (valid certs → attempt SSL, verify), Neon Local (self-signed → attempt SSL, skip verification with `rejectUnauthorized: false`), plain Postgres for tests (no SSL → don't attempt at all, `ssl: false`). The trap: `{ rejectUnauthorized: false }` still attempts a handshake; only `ssl: false` disables it. The plain test DB refuses any handshake. (ISSUE-003.)
+</Accordion>
+<Accordion title="How do tests get a clean database, and why TRUNCATE ... RESTART IDENTITY CASCADE?">
+A beforeEach runs it. TRUNCATE is faster than row-by-row DELETE; RESTART IDENTITY resets serial IDs to 1 so assertions like expect(id).toBe(1) aren't test-order-dependent; CASCADE handles the commentary→matches FK automatically.
+</Accordion>
+<Accordion title="Why parameterized queries via Drizzle rather than raw SQL?">
+User input is never string-concatenated into SQL, closing off SQL injection. The only raw SQL (TRUNCATE in the test reset) takes no user input. This is injection defense by construction, not by sanitizing.
+</Accordion>
+<Accordion title="What does Neon Local give you in dev that a plain Postgres container doesn't?">
+Production parity: it's real Neon behavior (same engine, same SSL semantics) and forks an ephemeral branch per run that's deleted on teardown — isolated, disposable, prod-like. A plain container doesn't match Neon's SSL/connection behavior (which is exactly how ISSUE-003 surfaced).
+</Accordion>
+</AccordionGroup>
+
+## Testing
+
+<AccordionGroup>
+<Accordion title="Why mock Arcjet but use a real Postgres?">
+Arcjet's protect() makes a real network call — mocking keeps tests fast, offline, deterministic, and quota-free. The database is the opposite: mocking it would mean testing the mock, not the actual SQL/schema/constraints. So we mock the external network dependency and keep the thing we're actually verifying real.
+</Accordion>
+<Accordion title="Why does the Arcjet mock live in a setup file that runs before imports?">
+arcjet.ts throws at module-import time if ARCJET_KEY is missing. Any test importing app.ts transitively imports arcjet.ts, so the env var and mock must be in place before collection — a setupFile runs before any test file's imports are evaluated.
+</Accordion>
+<Accordion title="Two real bugs were found by writing the WebSocket tests. What does that tell you?">
+A message-delivery race and a hung-timer (missing close()) — both surfaced only because the tests exercised the real socket lifecycle. Tests aren't just regression guards; writing them forces you through the real lifecycle and exposes latent design gaps (here, no clean shutdown path).
+</Accordion>
+</AccordionGroup>
+
+## DevOps & Docker
+
+<AccordionGroup>
+<Accordion title="Why a multi-stage Dockerfile?">
+The builder stage installs all deps and compiles TS; the runner stage starts fresh, installs only prod deps, and copies just dist/. The final image has no compiler, no devDeps, no source — smaller and lower attack surface.
+</Accordion>
+<Accordion title="A container crash-loops with EACCES mkdir 'logs'. Diagnose and fix.">
+Non-root USER, but COPYed files are root-owned, so the user can't create logs/ in /app. Winston throws at startup; restart:unless-stopped loops it. Fix: mkdir -p logs && chown -R sportz:sportz /app before USER. Better in prod: log to stdout only, no file transport. (ISSUE-002.)
+</Accordion>
+<Accordion title="What does HOST=0.0.0.0 mean and why does a container need it?">
+Bind to all interfaces. 127.0.0.1 inside a container means only the container itself — the host/Render proxy can't reach it. 0.0.0.0 accepts connections routed in from outside. It only matters in containers/remote hosts; locally either works.
+</Accordion>
+<Accordion title="Why did docker-compose.prod.yml break, and how do such bugs hide?">
+It referenced target: production, but the Dockerfile only defines builder and runner. Multi-file Docker setups drift silently because nothing cross-checks a compose target against the Dockerfile's stage names until you build that file. Fix: match the stage name (runner) and build the prod image in CI so drift fails fast. (ISSUE-005.)
+</Accordion>
+</AccordionGroup>
+
+## CI/CD
+
+<AccordionGroup>
+<Accordion title="Why does CI use a postgres service container instead of a Neon branch?">
+Speed (no API round-trip to provision), cost (no Neon quota per run), determinism (starts empty every run), and it works on forks where a Neon secret wouldn't be available. The plain container mirrors the local test DB exactly, so 'passes locally' predicts 'passes in CI'.
+</Accordion>
+<Accordion title="Why run lint and format with continue-on-error then a final gate?">
+A failing step normally stops the job, so you'd fix lint, push, then discover format is also broken. continue-on-error lets both run; the gate step inspects both outcomes and fails once, surfacing every problem in a single run with fix-command annotations.
+</Accordion>
+<Accordion title="Why build multi-arch (amd64 + arm64) images?">
+amd64 covers most cloud VMs; arm64 covers Apple Silicon and cheaper ARM cloud instances (Graviton). One tag works everywhere — Docker pulls the right architecture for the host. Build cache (type=gha) keeps the slower emulated build fast across runs.
+</Accordion>
+</AccordionGroup>
+
+## Security
+
+<AccordionGroup>
+<Accordion title="What are the layers of defense on an incoming request?">
+Helmet (secure headers) → CORS (origin allowlist) → Arcjet (shield, bot detection, sliding-window rate limit) → Zod (input validation) → Drizzle (parameterized queries). Each rejects a class of bad traffic before the next.
+</Accordion>
+<Accordion title="Sportz has no auth — is that a vulnerability?">
+It's a deliberate scope decision for a public demo, not an oversight — there are no user accounts or protected resources. But it's the first thing to add before any real multi-user deployment: anyone reaching the API can create matches/commentary. CSRF is N/A until cookie-based auth exists; a CSP header is a recommended hardening step regardless.
+</Accordion>
+<Accordion title="How are secrets handled across environments?">
+Never committed (.env* gitignored; only .env.*.example tracked). Prod injects via the host dashboard (Render, sync:false). CI uses GitHub Actions secrets. The image never bakes secrets in.
+</Accordion>
+</AccordionGroup>
+
+## Observability
+
+<AccordionGroup>
+<Accordion title="What are the three pillars, and where does Sportz stand on each?">
+Logs (what happened), metrics (how it performs), traces (where a request went). Sportz has logs (Winston) fully; frontend RUM/errors/analytics wired (Sentry/PostHog/New Relic, awaiting keys); backend metrics and tracing are gaps. The biggest gap to close is OpenTelemetry on the backend.
+</Accordion>
+<Accordion title="Why is New Relic lazy-loaded after hydration?">
+A performance-monitoring agent loaded synchronously in `<head>` blocks rendering and hurts the very LCP it measures. Loading it after the page is interactive avoids skewing (and degrading) the metric.
+</Accordion>
+<Accordion title="Why does PostHog need manual $pageview tracking here?">
+App Router navigations update the URL via the History API without a full page load, which PostHog's auto-capture misses. A usePathname effect fires $pageview on every route change so analytics aren't undercounted.
+</Accordion>
+</AccordionGroup>
+
+## Scaling & Architecture
+
+<AccordionGroup>
+<Accordion title="Scale to 100k concurrent — what breaks first and how do you fix it?">
+The in-process subscription registry. Past one instance, a client on instance A misses events created on instance B. Fix: a Redis pub/sub backbone — each instance publishes broadcasts to a channel and relays to its own local subscribers. Plus pooled DB connections, per-instance connection limits, and a load balancer. None of this is needed below ~10k.
+</Accordion>
+<Accordion title="When would you add Redis, and when is adding it a mistake?">
+Add it when you horizontally scale the API (multi-instance broadcast) or a measured hot read path justifies caching. It's a mistake before then — React Query caches client-side, the DB is fast at this scale, and unused infrastructure is pure operational cost.
+</Accordion>
+<Accordion title="Defend the monolith.">
+One process serving REST + WS is simpler to deploy, reason about, and debug, with no inter-component network hops. Splitting early buys distributed-systems complexity for no benefit. Evolution is driven by measured pressure: scale the monolith horizontally first; extract a service only when it develops independent scaling/availability needs.
+</Accordion>
+</AccordionGroup>

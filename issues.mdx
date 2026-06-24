@@ -1,0 +1,101 @@
+---
+title: "Engineering Log — Issues & Post-Mortems"
+description: "Every real bug encountered building Sportz, with root cause, investigation, and prevention."
+---
+
+These are **real** bugs hit while building Sportz — not illustrative examples. Each follows: **Symptom → Investigation → Root Cause → Resolution → Lesson → Prevention.** This is the most valuable page in the handbook, because it documents how the system actually behaves under failure and how those failures were reasoned about.
+
+---
+
+## ISSUE-001 — WebSocket tests timed out waiting for a message that had already arrived
+
+**Symptom.** Every WebSocket test failed with `Timed out after 2000ms waiting for a WebSocket message` — including the simplest "connect and expect welcome" test. The full suite hung for 108 seconds.
+
+**Investigation.** Because even the simplest case failed, suspicion fell on the test scaffolding, not the app. A standalone diagnostic script (outside Vitest) connected a real client and logged timestamps: `open at +13ms`, `message at +14ms`. The server *was* sending `welcome` correctly — and `open` and `message` fired **1ms apart**.
+
+**Root cause.** A race condition in the test helper. It awaited the `open` event, resolved, and *only then* attached a `message` listener. In that gap between "open resolved" and "listener attached," the server's near-instant `welcome` message arrived — and Node's `EventEmitter` drops events that have no listener yet. The message was gone before anything listened.
+
+**Resolution.** Attach the `message` listener **synchronously the instant the socket is constructed**, before any `await`, queuing incoming messages so `nextMessage()` either pops a queued one or waits for the next. After the fix: 12/12 pass in 1.83s.
+
+**Lesson.** This was purely a test artifact — the production frontend attaches `onmessage` synchronously and was never affected. Event-based APIs are race-prone when you `await` between "thing starts" and "I start listening."
+
+**Prevention.** Helpers for instant event sources must register listeners before yielding to the event loop. The diagnostic-script technique (reproduce outside the test framework, measure real timings) is the reusable move.
+
+---
+
+## ISSUE-002 — Container crash-looped on startup with `EACCES: permission denied, mkdir 'logs'`
+
+**Symptom.** `docker compose up` showed `sportz-app-1` stuck `Restarting`, repeatedly. Logs: `Error: EACCES: permission denied, mkdir 'logs'`.
+
+**Investigation.** `docker compose logs app` showed the stack trace pointing at Winston's File transport calling `mkdirSync('logs')` at startup.
+
+**Root cause.** The Dockerfile creates a non-root user (`USER sportz`) for security, but everything copied via `COPY` is owned by `root`. Winston (in non-production) tries to create `logs/` inside `/app`, which `sportz` has no write permission for. The uncaught exception crashed the process; `restart: unless-stopped` turned a deterministic startup failure into an infinite loop.
+
+**Resolution.** Create the directory and hand ownership to the user *before* switching to it:
+```dockerfile
+RUN mkdir -p logs && chown -R sportz:sportz /app
+USER sportz
+```
+Verified by rebuilding and running standalone — server stayed up, no EACCES.
+
+**Lesson.** Running as non-root is correct security, but it means anything the app writes at runtime needs explicit ownership. A deterministic crash + restart policy = infinite loop, which masks the one-line root cause behind noise.
+
+**Prevention.** Audit what the app writes at runtime (logs, temp, caches) and `chown` those paths in the Dockerfile. Better still: in production, log to stdout only (no file transport), which sidesteps the filesystem entirely.
+
+---
+
+## ISSUE-003 — Integration tests failed with "The server does not support SSL connections"
+
+**Symptom.** All 28 integration tests failed at `resetDb()`: `Error: The server does not support SSL connections`.
+
+**Investigation.** The error came from the `pg` driver attempting an SSL handshake against the plain `postgres:16-alpine` test container.
+
+**Root cause.** `db.ts` always passed an `ssl` object to the Pool. Passing *any* `ssl` value — even `{ rejectUnauthorized: false }` — tells `pg` to **attempt** SSL. Neon Cloud and Neon Local both speak SSL, so this was fine in dev/prod. But the vanilla test Postgres has no SSL configured at all and refuses the handshake. The code assumed "we always talk to Neon."
+
+**Resolution.** Add a third state. `DATABASE_SSL=false` sets `ssl: false` (no handshake attempt) rather than relaxed verification:
+```ts
+ssl: sslEnabled ? { rejectUnauthorized } : false
+```
+The test setup defaults `DATABASE_SSL=false`. After the fix: 95/95 pass.
+
+**Lesson.** "Disable certificate verification" and "disable SSL entirely" are different operations that look almost identical. There are three connection contexts, not two: valid-cert (Cloud), self-signed (Local), no-SSL (plain Postgres).
+
+**Prevention.** Make connection config explicit about all environments it must serve. The three-way table lives in [Backend Architecture](/architecture/backend).
+
+---
+
+## ISSUE-004 — Posting commentary for a non-existent match returns 500, not 404
+
+**Symptom.** `POST /matches/999999/commentary` (no such match) returns a generic `500 Failed to create commentary` instead of a `404`.
+
+**Investigation.** The route validates the `matchId` param (a valid positive integer — Zod can't know if it *exists*) and the body, then inserts. The insert hits the database foreign-key constraint (`commentary.matchId → matches.id`), Postgres rejects it (`code: 23503`), and the route's generic `catch` turns it into a `500`.
+
+**Root cause.** No existence check before insert; the FK violation surfaces as an opaque server error rather than an accurate "not found."
+
+**Resolution (deferred, deliberately).** Not yet fixed. A test pins the **current** `500` behavior with a comment explaining why — so a future fix to `404` is a visible, intentional change (the test must be updated), not a silent regression. Two fix options are documented: an explicit `SELECT` existence check before insert (one extra query, readable) vs. catching Postgres error code `23503` (no extra query, couples to driver internals).
+
+**Lesson.** Validation that a value is *well-formed* (Zod) is not validation that it *exists* (DB). The gap between them is where misleading error codes hide.
+
+**Prevention.** For any insert referencing a foreign key, decide explicitly how a missing parent should surface — and encode that decision in a test.
+
+---
+
+## ISSUE-005 — `docker-compose.prod.yml` referenced a build target that didn't exist
+
+**Symptom.** Latent — would error on `docker compose -f docker-compose.prod.yml build` with an unknown-target failure.
+
+**Investigation.** Cross-checking the Dockerfile stages against both compose files: the Dockerfile defines stages `builder` and `runner`. The dev compose correctly used `target: runner`. The prod compose used `target: production` — a stage that does not exist.
+
+**Root cause.** Drift between the Dockerfile's stage names and the prod compose's referenced target.
+
+**Resolution.** Changed the prod compose to `target: runner`, matching the Dockerfile and the dev compose. Validated with `docker compose config`.
+
+**Lesson.** Multi-file Docker setups drift silently because nothing cross-checks a compose `target` against the Dockerfile's stage names until you actually build that file.
+
+**Prevention.** Keep stage names consistent across all compose files, and build the prod image in CI (the `docker-build-and-push` workflow does this) so target drift fails fast instead of at deploy time.
+
+---
+
+<Note>
+The pattern across all five: **observe the real symptom → reproduce/measure with direct evidence → form a specific causal hypothesis → make the single change it predicts → verify the prediction.** No guessing. Each fix was confirmed by re-running the exact failure path, not assumed.
+</Note>

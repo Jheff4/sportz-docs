@@ -1,0 +1,82 @@
+---
+title: "Staff Engineer Interview Prep"
+description: "Large-scale design, tradeoffs, incident response, evolution, and leadership — grounded in Sportz."
+---
+
+Staff-level questions are less "how does it work" and more "how do you reason about evolving it, what would you trade, and how do you lead through ambiguity." Each answer demonstrates judgment, not recall.
+
+## Architecture evolution
+
+<AccordionGroup>
+<Accordion title="Defend the monolith, then describe the evolution path.">
+At current scale the monolith is correct: one process serving REST + WS is simpler to deploy, reason about, and debug, with no inter-component network hops. Premature splitting buys distributed-systems cost (network failure modes, deploy coordination, tracing) for no benefit. Evolution, driven by measured pressure: (1) horizontally scale the same monolith behind a load balancer + Redis pub/sub for cross-instance broadcast; (2) extract a service only if a concern (e.g. event ingestion) develops independent scaling/availability needs. Trigger is data, not aesthetics.
+</Accordion>
+<Accordion title="Introduce auth without a rewrite.">
+Auth is absent by design (public demo). Add it at the edge: a provider (Clerk/Auth.js) + a users table + middleware after Arcjet, before routes. The WS upgrade validates a token during the handshake. Keep it additive — read paths can stay public, write paths gate. CSRF becomes relevant once cookie sessions exist; until then N/A. The key is that the gate points (HTTP middleware chain, WS upgrade handler) already exist as clean seams.
+</Accordion>
+<Accordion title="The frontend and backend share data shapes by hand-mirroring types. How would you harden that contract at scale?">
+Today lib/types.ts mirrors the backend's Drizzle-inferred types manually — fine for one team, but it can drift. The staff move: generate an OpenAPI spec from the existing Zod schemas (zod-to-openapi), making validation the single source of truth, then generate the client types from that spec. Contract tests in CI then fail the build on drift. This converts a discipline-dependent invariant into an enforced one.
+</Accordion>
+<Accordion title="How would you evolve the data model for multiple sports with different event types?">
+Currently commentary.eventType is a free text string and metadata is jsonb — flexible but unvalidated per-sport. At scale you'd want per-sport event-type validation (a discriminated union in Zod keyed by sport) while keeping the storage flexible (jsonb). The tradeoff: stricter validation vs the cost of modeling every sport's events. Stage it — validate the common types first, leave metadata open for the long tail.
+</Accordion>
+</AccordionGroup>
+
+## Tradeoffs
+
+<AccordionGroup>
+<Accordion title="Hand-rolled WebSocket layer vs Socket.IO — when is each right?">
+Hand-rolled is right here: small protocol, minimal deps, full understanding, no need for presence/acks/fallbacks. Socket.IO becomes right when the protocol grows (presence, delivery acks, binary frames, transport fallback) — at which point reimplementing its feature set is the worse trade. Meta-principle: adopt the dependency when its feature set exceeds what you'd responsibly build and maintain yourself.
+</Accordion>
+<Accordion title="You deferred the 500-vs-404 fix. Justify that as a staff decision.">
+The fix is trivial; the decision of how isn't (extra existence query vs catching PG error 23503 — a round-trip vs coupling to driver internals). Rather than rush a tradeoff, we pinned current behavior in a test with an explanatory comment, making any future fix deliberate and reviewed. A documented, test-guarded known-gap beats a hasty fix that bakes in the wrong choice. (ISSUE-004.)
+</Accordion>
+<Accordion title="Mintlify (hosted, badge) vs Nextra (owned, more config) for docs — how do you frame the choice?">
+It's a classic build-vs-buy. Mintlify: zero config, polished instantly, but a 'Powered by' badge on the free tier and vendor dependency. Nextra: fully owned, no badge, deploys like the rest of the stack, but more setup. The deciding question isn't the tools — it's which constraint dominates: time-to-value (Mintlify) or ownership/white-label (Nextra). Naming the dominant constraint is the staff skill; the tool falls out of it.
+</Accordion>
+<Accordion title="React Query caches client-side. When is that the wrong layer to cache at?">
+Client cache helps a single user's repeat views. It does nothing for cross-user load on a hot endpoint — 10k users each cold-fetching the same match list still hammer the DB. That's when a server-side cache (Redis) earns its place. The tradeoff is cache invalidation complexity and an extra moving part; you pay it only when measurements show the DB is the bottleneck, not preemptively.
+</Accordion>
+</AccordionGroup>
+
+## Incident response
+
+<AccordionGroup>
+<Accordion title="WS connections all drop on every deploy. Diagnose and fix.">
+Root cause: no graceful shutdown — SIGTERM exits immediately, killing in-flight WS uncleanly. Short-term: client reconnect-with-backoff (already built) masks it. Real fix: a SIGTERM handler that stops accepting new connections, calls the WS layer's close() (exists — stops heartbeat + closes server), drains HTTP, closes the DB pool, then exits. Add a deploy health-gate so traffic shifts only after the new instance is ready.
+</Accordion>
+<Accordion title="API p95 latency spikes; no backend metrics exist. Respond and prevent.">
+Respond: without APM, localize via Render request logs + Winston (route vs DB?), and Neon's dashboard for slow queries / connection saturation. Prevent: this incident is the business case for the backend-observability gap — add OpenTelemetry on Express + pg for route/query timings, then p95 alerts. The discipline: let the incident convert a known gap into prioritized, justified work rather than speculative instrumentation.
+</Accordion>
+<Accordion title="A goal event reaches some viewers but not others during a traffic spike. Where do you look?">
+First isolate: is it delivery (WS) or persistence (DB)? Check whether the event is in the DB (it is — POST returned 201). So it's broadcast. At a single instance, suspect dropped/slow sockets (backpressure on ws.send) or clients silently disconnected (heartbeat hasn't reaped them yet). At multiple instances, this is the in-process-registry limitation manifesting — viewers on instances that didn't originate the event. That symptom is itself the signal you've outgrown single-instance broadcast.
+</Accordion>
+<Accordion title="Arcjet has an outage. What happens to Sportz, and is that the right behavior?">
+The HTTP path catches Arcjet errors and returns 503 — it fails closed (denies traffic). For a security gate that's defensible (don't serve unprotected), but it couples your availability to Arcjet's. The staff discussion: decide deliberately between fail-closed (secure, less available) and fail-open (available, briefly unprotected) per risk tolerance, and make it configurable rather than incidental.
+</Accordion>
+</AccordionGroup>
+
+## Scaling deep-dive
+
+<AccordionGroup>
+<Accordion title="Walk the system through 10 → 1M users. What changes at each stage?">
+10–1k: single instance, everything holds. 1k–10k: watch pg pool size and WS memory (each connection holds a subscription Set); still one instance. 10k–100k: need multiple instances for CPU/availability — the moment you do, in-process broadcast breaks, so introduce Redis pub/sub; pooled DB connections become essential. 100k–1M: read replicas / caching for hot reads, possibly sharding matches across channels, CDN for static frontend, and dedicated event-ingestion if write volume demands it. Each step is triggered by a measured limit, not a calendar.
+</Accordion>
+<Accordion title="What's the failure mode of the heartbeat at scale, and how would you tune it?">
+30s ping to every client is O(connections) work every 30s on one thread. At 100k connections that's a measurable periodic stall. Tune: stagger pings across the interval, or offload to a worker, and consider raising the interval (trading faster ghost-reaping for less overhead). The principle: a constant-cost loop becomes a hotspot once the constant is large.
+</Accordion>
+</AccordionGroup>
+
+## Leadership & judgment
+
+<AccordionGroup>
+<Accordion title="A junior wants to add Redis 'to be ready to scale.' Respond.">
+Validate the instinct, then redirect with principle: infrastructure is added when a measured constraint demands it, not speculatively. Walk through what would force Redis (multi-instance broadcast) and why we're not there (one instance handles current load). Make it a teaching moment on premature complexity and the carrying cost of unused infra — and capture the trigger condition in the docs so it's added at the right time by anyone, not lost as tribal knowledge.
+</Accordion>
+<Accordion title="How do you decide what to document vs leave in code, given limited time?">
+Document the why and the non-obvious: decisions with alternatives (ADRs), real failures (post-mortems), and the gap between what exists and what doesn't (project status). Don't document what the code already states clearly. The test: would a competent engineer reconstruct this reasoning from the code alone? If no (a tradeoff, a deferred fix, a scale trigger), document it. Sportz's handbook is built on exactly this split.
+</Accordion>
+<Accordion title="You inherit Sportz with no original authors available. What gives you confidence to change it?">
+Three things, all present: a test suite that fails loudly on regressions (95 tests across unit/integration/WS), a decision log explaining why things are the way they are (so I don't 'fix' a deliberate choice), and post-mortems documenting how it behaves under failure. That triad — tests, decisions, failures — is what makes a system safely evolvable by strangers. It's the explicit design goal of this handbook.
+</Accordion>
+</AccordionGroup>

@@ -1,0 +1,138 @@
+---
+title: "Knowledge Checks"
+description: "Quizzes by difficulty — test your understanding of the Sportz system."
+---
+
+Self-check questions grouped by level. Answers are in the toggles — try before peeking.
+
+## Junior
+
+<AccordionGroup>
+<Accordion title="What protocol delivers live commentary to the browser, and why not regular HTTP requests?">
+WebSockets. Regular HTTP is request→response→done — the server can't push. WebSockets stay open so the server pushes events the instant they happen.
+</Accordion>
+<Accordion title="Where does the 'status' (scheduled/live/finished) of a match come from?">
+It's derived from `startTime` and `endTime` relative to now — not stored as a user input. Before start = scheduled, between = live, after end = finished.
+</Accordion>
+<Accordion title="What does HOST=0.0.0.0 mean and why does the container need it?">
+"Listen on all network interfaces." Inside a container, `127.0.0.1` means only the container itself — Render's proxy couldn't reach it. `0.0.0.0` lets external traffic in.
+</Accordion>
+</AccordionGroup>
+
+## Mid
+
+<AccordionGroup>
+<Accordion title="A new commentary event arrives over WebSocket. Trace how it reaches the screen.">
+`useWebSocket`'s `onmessage` → routes to `onCommentary` → `addEvent` → `setQueryData` prepends it to `['commentary', matchId]` → the panel re-renders → the new `CommentaryEvent` animates in.
+</Accordion>
+<Accordion title="Why is Arcjet mocked in tests instead of using a real key?">
+`protect()` makes a real network call — that would make tests flaky (network/uptime), slow (round-trip per request), and consume quota. The mock always allows, so tests are fast, offline, deterministic.
+</Accordion>
+<Accordion title="Why does the commentary query use enabled: matchId !== null?">
+So it doesn't fire when no match is selected (which would request `/matches/null/commentary` and 404). It activates automatically the moment a match is chosen.
+</Accordion>
+</AccordionGroup>
+
+## Senior
+
+<AccordionGroup>
+<Accordion title="Why is broadcastCommentary room-scoped but broadcastMatchCreated global?">
+A new match should appear in everyone's grid (global). Commentary only matters to people watching that specific match (room-scoped, via the `matchSubscribers` map). Sending all commentary to all clients would be wasteful and leak unrelated matches' data.
+</Accordion>
+<Accordion title="Explain the three SSL cases in db.ts, and why disabling cert checks is not the same as disabling SSL.">
+Cloud (valid certs → verify), Local (self-signed → attempt SSL, skip verification), plain Postgres (no SSL → don't attempt at all). `{ rejectUnauthorized: false }` still *attempts* a handshake; `ssl: false` skips it entirely. The plain test DB refuses any handshake, so it needs `ssl: false`.
+</Accordion>
+<Accordion title="What's the single change that lets the WebSocket layer scale past one instance?">
+A pub/sub backbone (e.g. Redis): each instance publishes broadcasts to a channel and relays to its own local subscribers, because the in-process `matchSubscribers` map only knows about one instance's connections.
+</Accordion>
+</AccordionGroup>
+
+## Staff
+
+<AccordionGroup>
+<Accordion title="Argue for keeping the synchronous in-process broadcast, then state the exact condition that invalidates the argument.">
+It's the simplest correct design for a single instance — no network, no extra infra, fully understood. It's invalidated the moment you run more than one API instance, because a broadcast on instance A never reaches a client connected to instance B. That condition — horizontal scaling — is the trigger to introduce pub/sub, and not before.
+</Accordion>
+<Accordion title="A known 500-vs-404 bug exists with a test pinning the wrong behavior. Why might that be the correct staff decision?">
+Because the fix has a non-trivial tradeoff (extra query vs coupling to PG error codes), pinning current behavior with an explanatory test makes any future fix deliberate and reviewed rather than silent — preventing a rushed choice from baking in the wrong tradeoff. A documented, test-guarded known-gap beats a hasty fix.
+</Accordion>
+</AccordionGroup>
+
+---
+
+# By domain
+
+The level-based sets above span topics. These sets drill a single domain deep.
+
+## Frontend
+
+<AccordionGroup>
+<Accordion title="Why does MatchCard use React.memo with a custom comparator rather than a default memo?">
+A default memo does a shallow prop compare, but match objects are recreated on every parent render (new reference), so shallow compare would still re-render every card. The custom comparator compares the specific fields that affect output (id, scores, status, isActive, index) by value, so a card re-renders only when its own data actually changed.
+</Accordion>
+<Accordion title="Why is the continuous 'live' pulse done in CSS but the new-event entrance in Framer Motion?">
+The pulse runs the entire session — a JS animation would hold a requestAnimationFrame loop the whole time; CSS runs on the compositor for free. The event entrance is a one-shot, event-driven animation where Framer Motion's AnimatePresence enter/exit ergonomics are worth it. Right tool per animation type.
+</Accordion>
+<Accordion title="Why are the observability providers nested in a specific order in layout.tsx?">
+Providers that others depend on go outermost. Theme wraps everything (any provider/component may read it); Query wraps the app (components call useQuery); PostHog needs a Suspense boundary and sits inside Query; New Relic is a pure side-effect with no children dependencies, so innermost. Order encodes the dependency graph.
+</Accordion>
+<Accordion title="What breaks if you animate a card's height instead of using transform?">
+Animating height triggers layout recalculation and paint on every frame — janky, especially during high-frequency WS updates. transform/opacity are GPU-composited and skip layout/paint. The rule: never animate layout-affecting properties.
+</Accordion>
+</AccordionGroup>
+
+## Backend & real-time
+
+<AccordionGroup>
+<Accordion title="Why must close() clear the heartbeat interval, and what went wrong before it existed?">
+setInterval keeps the Node process alive. Without close() clearing it, the test process never exited cleanly — the WS test suite hung. close() also becomes the building block for graceful shutdown on SIGTERM. (Discovered writing the WS tests.)
+</Accordion>
+<Accordion title="A malformed JSON frame arrives on the socket. What happens, and why not crash?">
+handleMessage wraps JSON.parse in try/catch and replies `{ type: 'error', message: 'Invalid JSON' }` rather than throwing. A single client's bad frame must never crash the server or affect other clients — defensive parsing at the boundary.
+</Accordion>
+<Accordion title="Why does Arcjet run on the WebSocket upgrade, not just HTTP routes?">
+The upgrade handshake is an HTTP request before the socket opens — an unprotected upgrade would let bots open unlimited connections, exhausting memory (each holds a subscription Set). Arcjet on the upgrade applies a stricter sliding window (5 connections/2s) at exactly that chokepoint.
+</Accordion>
+</AccordionGroup>
+
+## Data & persistence
+
+<AccordionGroup>
+<Accordion title="Why RESTART IDENTITY in the test reset, beyond just emptying tables?">
+It resets the serial primary-key sequence to 1. Without it, IDs climb across tests, making assertions like expect(data.id).toBe(1) depend on test execution order — fragile. RESTART IDENTITY makes each test's IDs deterministic.
+</Accordion>
+<Accordion title="Posting commentary for a non-existent match — what does the DB do, and what does the user see?">
+The FK constraint (commentary.matchId → matches.id) rejects the insert with Postgres error 23503. The route's generic catch turns it into a 500 'Failed to create commentary' — the known 404-vs-500 gap. The DB enforces integrity correctly; the API just reports it imprecisely.
+</Accordion>
+</AccordionGroup>
+
+## DevOps, CI/CD & deploy
+
+<AccordionGroup>
+<Accordion title="Why does the Dockerfile copy package*.json before the source code?">
+Layer caching. npm ci only re-runs when package*.json changes; if source were copied first, every code change would invalidate the dependency-install layer and reinstall everything. Copy manifests → install → copy source orders layers from least to most frequently changing.
+</Accordion>
+<Accordion title="Render doesn't run migrations. What's the consequence and the fix?">
+On first deploy the Neon Cloud DB has no schema, so every query fails with 'relation does not exist'. Fix: run npm run db:migrate against the prod DATABASE_URL once before/after deploy (or as a release step). Migrations are a separate concern from running the app.
+</Accordion>
+<Accordion title="Why prefer logging to stdout in production over file transports?">
+Containers are ephemeral — file logs vanish on restart and (as ISSUE-002 showed) can crash startup on permission errors. stdout is captured by the platform (Render) and is the only durable log surface in a container. Sportz logs to console-only in production, files only in dev.
+</Accordion>
+</AccordionGroup>
+
+## Security & scaling
+
+<AccordionGroup>
+<Accordion title="Does Sportz need CSRF protection today? Will it ever?">
+Not today — CSRF exploits ambient credentials (cookies) on state-changing requests, and Sportz has no cookie-based auth. The moment cookie sessions are added, CSRF becomes relevant and needs tokens/SameSite. It's a 'when auth arrives' concern, correctly N/A now.
+</Accordion>
+<Accordion title="At what user count does client-side React Query caching stop helping with DB load?">
+It never helped cross-user load — it caches per-user repeat views. 10k users each cold-loading the same match list still hit the DB 10k times. Server-side caching (Redis) addresses that, and only earns its place once measurements show the DB is the bottleneck.
+</Accordion>
+</AccordionGroup>
+
+## Practical exercise
+
+<Note>
+Stand up the full stack locally: start the test Postgres, run migrations, run all 95 tests, then `npm run dev:docker` and POST a match + a commentary event with `curl` while watching a `wscat -c ws://localhost:8000/ws` connection receive the broadcast. If the event arrives in the socket, you've exercised the entire real-time path end to end.
+</Note>

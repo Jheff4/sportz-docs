@@ -1,0 +1,115 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "Sportz Docs",
+  "colors": {
+    "primary": "#EAB308",
+    "light": "#F4C542",
+    "dark": "#EAB308"
+  },
+  "favicon": "/favicon.svg",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Handbook",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "index",
+              "project-status",
+              "stories"
+            ]
+          },
+          {
+            "group": "Architecture",
+            "pages": [
+              "architecture/system",
+              "architecture/frontend",
+              "architecture/backend",
+              "architecture/realtime"
+            ]
+          },
+          {
+            "group": "Engineering Stories",
+            "pages": [
+              "decisions",
+              "issues"
+            ]
+          },
+          {
+            "group": "Operations",
+            "pages": [
+              "operations/testing",
+              "operations/devops",
+              "operations/observability",
+              "operations/security"
+            ]
+          },
+          {
+            "group": "Reference",
+            "pages": [
+              "reference/api"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Learn & Interview",
+        "groups": [
+          {
+            "group": "Learning",
+            "pages": [
+              "learning/curriculum",
+              "learning/quizzes"
+            ]
+          },
+          {
+            "group": "Interview Prep",
+            "pages": [
+              "interview/senior",
+              "interview/staff"
+            ]
+          }
+        ]
+      }
+    ],
+    "global": {
+      "anchors": [
+        {
+          "anchor": "Backend Repo",
+          "href": "https://github.com/Jheff4/sportz-websockets",
+          "icon": "server"
+        },
+        {
+          "anchor": "Frontend Repo",
+          "href": "https://github.com/Jheff4/sportz-ui",
+          "icon": "browser"
+        }
+      ]
+    }
+  },
+  "logo": {
+    "light": "/logo/light.svg",
+    "dark": "/logo/dark.svg"
+  },
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/Jheff4/sportz-websockets"
+    }
+  },
+  "contextual": {
+    "options": [
+      "copy",
+      "view",
+      "chatgpt",
+      "claude"
+    ]
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/Jheff4"
+    }
+  }
+}

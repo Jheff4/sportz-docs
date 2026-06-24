@@ -1,0 +1,111 @@
+---
+title: "User Stories"
+description: "Real people using Sportz — what they experience moment to moment, and why it behaves that way because of what we built."
+---
+
+These are narrative walkthroughs of real humans using Sportz. Each beat of their experience is annotated with **why it happens** — tracing the felt experience back to a specific engineering decision. Read top to bottom for a story; read the "Under the hood" notes to connect product to code.
+
+---
+
+## Story 1 — Amara follows a live football match (desktop)
+
+> Amara, 27, is at her desk during lunch. Arsenal vs Chelsea kicked off ten minutes ago and she can't stream the video, so she opens Sportz.
+
+The page loads to a grid of match cards. One card has a small **red dot gently pulsing** next to the word "Live," and the score reads 1–0 with the "1" sitting in a **yellow box**. She clicks **Watch Live**. The button shifts to a blue "Watching Live" and a commentary panel on the right springs to life — a timeline of events, newest at the top, each tagged GOAL, FOUL, SUBSTITUTION in different colors.
+
+A minute later Saka scores. She *sees* it happen: the score box flips — the "1" sliding up and out, a "2" rising in to replace it — and at the top of the commentary panel a new GOAL event slides gently into place: *"A composed finish from close range."* She didn't refresh anything.
+
+<Note>
+**Under the hood — why Amara's experience works this way:**
+- The **pulsing red dot** is the `LiveIndicator` — a Framer Motion scale/opacity breathe, *not* a JS timer per card, so 12 cards pulsing cost nothing. ([Frontend](/architecture/frontend))
+- The **yellow score box** is the winning-team highlight, computed from `homeScore > awayScore` and themed via a CSS variable.
+- Clicking **Watch Live** sends a WebSocket `subscribe` for that match — she joins that match's "room." ([Real-Time](/architecture/realtime))
+- The **score flip** is `AnimatePresence` with `mode="popLayout"` keyed on the score — the old number exits up, the new enters up, no layout shift. The *direction* tells her the score went up before she even reads it.
+- The **new GOAL event appearing without refresh** is the whole point: the operator's POST wrote to Postgres, the route broadcast it only to that match's subscribers, and her client wrote it straight into the React Query cache, which re-rendered the panel.
+- She gets *only* Arsenal-Chelsea commentary because `broadcastCommentary` is **room-scoped** — the cricket match three cards down isn't spamming her.
+</Note>
+
+---
+
+## Story 2 — Dayo on the train, going through a tunnel (mobile + network loss)
+
+> Dayo, 34, is watching the same match on his phone on a moving train. He taps Watch Live and a panel **slides up from the bottom of the screen**, covering the lower two-thirds. He reads commentary with his thumb. Then the train enters a tunnel.
+
+The connection badge at the top, which had read a green **"Live Connected,"** turns **amber: "Reconnecting…"**. The commentary freezes — no new events. After a few seconds with no signal, a small modal appears: *"Connection Lost — attempting to reconnect automatically,"* with Retry and Dismiss. He dismisses it and keeps reading what's already there. The train exits the tunnel; within a couple of seconds the badge flicks back to green and the feed resumes — the goals he missed are already there.
+
+<Note>
+**Under the hood — why Dayo's experience degrades gracefully:**
+- The **bottom sheet** is a separate mobile component (not the desktop sticky panel) — it's the native mobile pattern, draggable to dismiss, keeping the match grid visible behind it. ([Frontend](/architecture/frontend))
+- The **badge going amber** reflects the WebSocket status state machine: `connected → reconnecting → connected`, each with its own color in `StatusBadge`.
+- The client doesn't give up instantly — `useWebSocket` retries with **exponential backoff** (2s, 4s, 8s…). This is why a tunnel doesn't permanently break his session: a brief drop recovers on its own. ([Real-Time](/architecture/realtime))
+- The **error modal** appears only on a full disconnect and offers a manual Retry, but the automatic reconnect usually beats him to it.
+- When he reconnects, the missed goals are present because the panel re-fetches the match's commentary on resubscribe — the DB is the durable record; the socket is just the live delivery.
+</Note>
+
+---
+
+## Story 3 — Priya runs the match desk (the operator)
+
+> Priya, 41, is courtside entering events into an internal tool that POSTs to the Sportz API. A yellow card is shown; she submits the event.
+
+She fills the form — minute, player, "Booked for a rash tackle" — and submits. The API returns `201` almost instantly, and she knows that within the same heartbeat, every viewer watching that match saw it appear. Earlier, she fat-fingered a submission with an empty message; the API bounced it back immediately with a `400` and a clear note that `message` is required — nothing reached the viewers. During a chaotic five-minute spell she submitted faster than allowed and got a `429 Too Many Requests`; she waited a beat and resumed.
+
+<Note>
+**Under the hood — why Priya's tooling behaves predictably:**
+- Her `201` *and* the viewers seeing it are the **REST→WebSocket seam**: the route persists the event, then calls `broadcastCommentary` before responding. Persist-then-broadcast means the DB is always the source of truth. ([System Architecture](/architecture/system))
+- The empty-message **`400`** is **Zod** validating the body before any DB write — bad data never reaches storage or viewers. ([Security](/operations/security))
+- The **`429`** is **Arcjet's** sliding-window rate limit (50 req/10s). It protects the system from a runaway client — even a trusted internal one — without her tooling needing to know the limit in advance.
+- If she'd posted commentary for a match ID that didn't exist, she'd currently get a `500`, not a `404` — a known imprecision we've documented rather than hidden. ([ISSUE-004](/issues))
+</Note>
+
+---
+
+## Story 4 — Sam prefers dark mode and reduced motion (accessibility)
+
+> Sam, 30, has vestibular sensitivity and uses "Reduce Motion" at the OS level. They also strongly prefer dark interfaces. They open Sportz in the evening.
+
+The app is **already dark** — they never toggled anything; it matched their system. The brand yellow still pops against the dark navy commentary panel. As goals come in, events **appear instantly without sliding or flipping** — no motion that could trigger discomfort, but they miss nothing; the data is all there. Sam toggles to light mode once out of curiosity using the sun icon in the header, and the whole interface transitions smoothly.
+
+<Note>
+**Under the hood — why Sam is accommodated by default:**
+- **Dark by default** because `next-themes` is set to follow the system preference on first visit — no setting to hunt for. ([Frontend](/architecture/frontend))
+- **No animation** because every Framer Motion animation checks `useReducedMotion()` — when the OS requests reduced motion, entrances and flips are skipped while the content still updates. This is treated as a requirement, not a nice-to-have.
+- **Yellow stays readable in dark mode** because the brand color was chosen for WCAG-AA contrast on both themes rather than darkened (which would look muddy).
+- The **smooth theme transition** is a deliberate 300ms CSS transition on background/color — slow enough to feel smooth, fast enough not to lag.
+</Note>
+
+---
+
+## Story 5 — Marcus opens Sportz on a quiet afternoon (the empty state)
+
+> Marcus, 22, opens Sportz at 3pm on a Tuesday when nothing is being played.
+
+Instead of a blank grid or a spinner that never resolves, he sees a tidy message: a stadium icon, *"No Live Matches,"* a line suggesting he check back soon, and a **Refresh** button. He clicks it; the page re-checks. Still nothing — but he's not confused about whether the app is broken or just quiet.
+
+<Note>
+**Under the hood — why "nothing" is still a designed experience:**
+- The **empty state** is a first-class `EmptyState` component, rendered when the matches query returns an empty array — distinct from the loading and error states. ([Frontend](/architecture/frontend))
+- The **skeletons** he'd have seen if data were loading are shaped like real match cards, so there's no layout jump when data arrives — but here there's simply no data, so the empty state shows instead.
+- **Refresh** does a full reload rather than a silent retry, because if the cause were the backend being down, a silent retry would fail again invisibly — a reload gives an honest fresh attempt.
+</Note>
+
+---
+
+## Story 6 — A scraper bot hammers the API (the abuse case)
+
+> Not a person — a bot. It discovers the public `/matches` endpoint and starts requesting it dozens of times a second to harvest data.
+
+It gets a burst of responses, then a wall of **`429 Too Many Requests`** and `403 Forbidden`. It never degrades the experience for Amara, Dayo, or Priya. If it tries to open a flood of WebSocket connections instead, the upgrade handshake itself is throttled before any socket opens.
+
+<Note>
+**Under the hood — why one bad actor doesn't ruin it for everyone:**
+- **Arcjet** runs on both the HTTP path *and* the WebSocket upgrade. The sliding window caps request and connection rates; bot detection flags non-human traffic (while allowing legitimate search engines/previews). ([Security](/operations/security))
+- Throttling the **WS upgrade** matters specifically because each open socket holds memory (a subscription `Set`) — letting a bot open unlimited connections would be a memory-exhaustion vector, so it's gated at the handshake, before the socket exists. ([Real-Time](/architecture/realtime))
+- If Arcjet itself had an outage, the HTTP path **fails closed** (`503`) rather than serving unprotected — a deliberate security-over-availability choice.
+</Note>
+
+---
+
+<Tip>
+Every one of these experiences is a direct consequence of a documented decision. When you read the [Architecture](/architecture/system) or [Decisions](/decisions) pages, you're reading the *causes* of the moments above. That two-way mapping — felt experience ⇄ engineering choice — is the point of this handbook.
+</Tip>

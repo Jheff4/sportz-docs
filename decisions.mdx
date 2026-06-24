@@ -1,0 +1,109 @@
+---
+title: "Architectural Decision Records"
+description: "Every major technical choice in Sportz, with the alternatives weighed and tradeoffs accepted."
+---
+
+Each record follows the same shape: **Context → Decision → Alternatives → Tradeoffs → Revisit when.** These are the real decisions made building Sportz, not a textbook list.
+
+---
+
+## ADR-001 — TypeScript everywhere
+
+**Context.** The system spans a Node API and a React frontend that share data shapes (a `Match`, a `Commentary` event).
+
+**Decision.** TypeScript on both sides, with the frontend's `lib/types.ts` mirroring the backend's Drizzle-inferred types.
+
+**Alternatives.** Plain JS (faster to write, no build step) — rejected: the shared data contracts are exactly where type safety pays off, and the WebSocket message protocol is easy to get subtly wrong without types.
+
+**Tradeoffs.** A compile step and stricter discipline, in exchange for catching shape mismatches at build time instead of runtime.
+
+**Revisit when.** Never, realistically, at this scale.
+
+---
+
+## ADR-002 — WebSockets for real-time (not SSE or polling)
+
+**Context.** Clients need live scores and commentary with sub-second latency.
+
+**Decision.** Raw `ws` WebSocket server, sharing the Express HTTP server via an `upgrade` listener.
+
+**Alternatives.**
+- **Polling** — simple, but high latency and wasteful at the cadence live sport needs.
+- **Server-Sent Events (SSE)** — one-directional (server→client) only. Sportz needs client→server too (subscribe/unsubscribe to specific matches), so SSE alone doesn't fit without a second channel.
+- **Socket.IO** — batteries-included (rooms, reconnect), but adds a protocol layer and client dependency. We wanted to own the (small) protocol and keep the dependency surface minimal.
+
+**Tradeoffs.** We hand-rolled rooms, heartbeat, and reconnect (which Socket.IO gives free) — but the implementation is small, dependency-light, and fully understood. The reconnect/heartbeat logic is documented in [Real-Time](/architecture/realtime).
+
+**Revisit when.** If the protocol grows complex (presence, acks, binary frames), Socket.IO's feature set may justify its weight.
+
+---
+
+## ADR-003 — TanStack Query for the data layer
+
+**Context.** The frontend fetches REST data *and* receives live WS updates for the same entities. Naively these are two separate state systems that must be reconciled.
+
+**Decision.** React Query owns server state. WebSocket events write directly into its cache via `setQueryData`, so REST and WS feed one source of truth.
+
+**Alternatives.**
+- **Manual `useState` + `useEffect` + fetch** — what existed first. Rejected after building it: it reimplements caching, loading/error state, dedup, and AbortController by hand, and still needs a separate reconciliation path for WS events.
+- **SWR** — comparable; React Query's `setQueryData` and `enabled` ergonomics fit the WS-into-cache and "no match selected" cases more cleanly.
+
+**Tradeoffs.** A dependency and its mental model, in exchange for deleting ~50 lines of hand-rolled fetching per hook and unifying live + fetched data.
+
+**Revisit when.** If the app became fully real-time with no REST seed, a lighter store might suffice.
+
+---
+
+## ADR-004 — Framer Motion, GPU-only animations
+
+**Context.** A live dashboard wants motion (new events sliding in, score flips) without jank during high-frequency updates.
+
+**Decision.** Framer Motion for event-driven animation, animating **only** `transform`/`opacity`. Continuous animation (the live pulse) uses CSS, not JS. `useReducedMotion` respected everywhere.
+
+**Alternatives.** CSS-only (less ergonomic for enter/exit with `AnimatePresence`); other JS libs (heavier or less React-native).
+
+**Tradeoffs.** A bundle cost, in exchange for declarative enter/exit and a clear performance discipline.
+
+**Revisit when.** If bundle size becomes critical, the handful of animations could drop to CSS.
+
+---
+
+## ADR-005 — Docker + Neon Local for dev, Neon Cloud for prod
+
+**Context.** Local dev should mirror production (Neon Postgres) without touching the real database.
+
+**Decision.** A multi-stage Dockerfile; `docker-compose.dev.yml` runs the app alongside **Neon Local** (a proxy that forks an ephemeral DB branch per run); prod connects directly to Neon Cloud.
+
+**Alternatives.** Plain local Postgres (doesn't match Neon's behavior/SSL); sharing a cloud dev DB (state bleeds between developers).
+
+**Tradeoffs.** Docker/Neon-Local setup complexity, in exchange for prod-like, disposable, isolated dev databases. The SSL difference between Neon Local (self-signed) and Cloud (valid) drove a real bug — see [Issues](/issues).
+
+**Revisit when.** Stable.
+
+---
+
+## ADR-006 — Vitest over Jest
+
+**Context.** The codebase is native ESM (`"type": "module"`, NodeNext resolution).
+
+**Decision.** Vitest, with a setup file that mocks Arcjet and sets test env before any import.
+
+**Alternatives.** Jest — its ESM support still needs `--experimental-vm-modules` plus `ts-jest` config plus module mapping. Painful for a pure-ESM project. Vitest is zero-config for this.
+
+**Tradeoffs.** None meaningful for this project; Vitest is the modern default for ESM + TS.
+
+**Revisit when.** Stable.
+
+---
+
+## ADR-007 — Arcjet for security
+
+**Context.** A public API needs rate limiting and bot protection without building it from scratch.
+
+**Decision.** Arcjet middleware on the HTTP path and on the WS upgrade, with rules for shield, bot detection, and a sliding window.
+
+**Alternatives.** `express-rate-limit` + a separate bot solution + hand-rolled shield rules — more pieces to wire and maintain.
+
+**Tradeoffs.** A third-party dependency and network call per request (mocked in tests so the suite stays fast and offline), in exchange for layered protection out of the box.
+
+**Revisit when.** If the per-request latency or vendor dependency becomes a concern, the rate-limit piece could move in-process.

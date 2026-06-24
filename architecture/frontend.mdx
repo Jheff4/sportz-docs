@@ -1,0 +1,82 @@
+---
+title: "Frontend Architecture"
+description: "The Next.js client: data layer, components, state strategy, and the design system."
+---
+
+The frontend (`sportz-ui`) is a **Next.js App Router** application. Despite using the App Router, nearly every component is a **client component** (`'use client'`) — because the app is fundamentally interactive and WebSocket-driven. Server components and streaming, which shine for content sites, would fight a real-time model where the client holds a live socket and mutates state continuously. That is a deliberate choice, not an oversight.
+
+## Folder structure
+
+```
+src/
+├── app/
+│   ├── layout.tsx      # providers nest here (Theme → Query → PostHog → NewRelic)
+│   ├── page.tsx        # the orchestrator — owns activeMatchId, wires hooks
+│   └── globals.css     # design tokens (brand yellow, dark theme, animations)
+├── components/
+│   ├── layout/Header.tsx
+│   ├── matches/        # MatchCard, MatchGrid, ScoreBox, LiveIndicator, SportBadge, skeleton
+│   ├── commentary/     # CommentaryPanel, CommentaryEvent, EventTypeBadge
+│   └── ui/             # SportzButton, Pagination, StatusBadge, modals, EmptyState
+├── hooks/
+│   ├── useWebSocket.ts # connect, reconnect (exponential backoff), subscribe
+│   ├── useMatches.ts   # React Query + client-side pagination
+│   └── useCommentary.ts# React Query, enabled only when a match is selected
+├── lib/
+│   ├── types.ts        # shared types mirroring the backend schema
+│   └── constants.ts    # env-aware API_URL / WS_URL, event colors
+└── providers/          # ThemeProvider, QueryProvider, PostHog, NewRelic
+```
+
+## Data fetching strategy — React Query
+
+REST data (matches, commentary) is fetched and cached by **TanStack Query**. The key design decision is that **WebSocket events write directly into the React Query cache** rather than into separate state:
+
+```ts
+// when a WS commentary event arrives, prepend it to the cached query
+queryClient.setQueryData(['commentary', matchId], old => ({
+  data: [event, ...(old?.data ?? [])],
+}));
+```
+
+This means there is **one source of truth** for commentary — the `['commentary', matchId]` cache entry — fed by both the initial REST fetch and live WS events. No reconciliation between "fetched data" and "live data." See the [React Query ADR](/decisions).
+
+## State management strategy
+
+| State | Where it lives | Why |
+|---|---|---|
+| Server data (matches, commentary) | React Query cache | Caching, dedup, loading/error states for free |
+| `activeMatchId` (which match is being watched) | `useState` in `page.tsx` | Shared across grid, panel, and WS — the orchestrator owns it |
+| WS connection status | `useState` in `useWebSocket` | Drives the connection badge |
+| Theme | `next-themes` | Persists to localStorage, resolves system preference |
+
+There is **no Zustand/Redux.** A single page with one shared pivot (`activeMatchId`) doesn't need a global store; `page.tsx` as orchestrator is sufficient. If routing/multi-page shared state arrives, the next step is a `useSportzApp()` custom hook, then a store — in that order.
+
+## The orchestrator pattern
+
+`page.tsx` owns the hooks and wires them together, because they depend on each other through shared state:
+
+```mermaid
+flowchart TB
+  page["page.tsx (orchestrator)\nowns activeMatchId"]
+  wsHook["useWebSocket"]
+  matchHook["useMatches"]
+  commentaryHook["useCommentary(activeMatchId)"]
+
+  page --> wsHook
+  page --> matchHook
+  page --> commentaryHook
+  wsHook -. "onMatchCreated → cache" .-> matchHook
+  wsHook -. "onCommentary → cache" .-> commentaryHook
+```
+
+## Design system
+
+Tokens live in `globals.css` as CSS variables, themed for light and dark. The rule enforced throughout: **components reference tokens, never raw hex.** One edit to a variable repaints the whole UI.
+
+- **Brand yellow** `#F4C542` (chosen over a more saturated original to reduce eye-fatigue over long match sessions)
+- **Semantic event colors** — GOAL green, YELLOW_CARD amber, RED_CARD/WICKET red, SUBSTITUTION blue — so commentary types are distinguishable at a glance, not all yellow.
+
+## Animation strategy
+
+Framer Motion, with one hard rule: **only animate `transform` and `opacity`** (GPU-composited), never layout properties. Continuous animations (the live pulse) use CSS, not JS, to avoid holding a `requestAnimationFrame` loop for the whole session. `useReducedMotion` disables motion for users who request it. See the [Framer Motion ADR](/decisions) and the animation performance entry in [Issues](/issues).

@@ -1,0 +1,112 @@
+---
+title: "System Architecture (C4)"
+description: "The Sportz system at four levels of zoom — context, containers, components, and code."
+---
+
+We describe the architecture using the [C4 model](https://c4model.com/): four levels of zoom, from "who uses it" down to "what the code does." Each level answers a different question for a different reader.
+
+## Level 1 — System Context
+
+*Who and what interacts with Sportz?*
+
+```mermaid
+flowchart TB
+  viewer["👤 Viewer\n(follows a live match)"]
+  operator["👤 Match Operator\n(posts scores & commentary via API)"]
+  sportz["⬛ Sportz Platform\nReal-time match broadcast"]
+  neon["☁️ Neon\nServerless Postgres"]
+  arcjet["☁️ Arcjet\nSecurity decisions"]
+
+  viewer -->|"views matches & live commentary"| sportz
+  operator -->|"POST /matches, POST /commentary"| sportz
+  sportz -->|"reads/writes match data"| neon
+  sportz -->|"protect() each request"| arcjet
+```
+
+There is no authentication layer — the "operator" is anyone with API access. That is a deliberate scope decision for a demo platform; see [Project Status](/project-status).
+
+## Level 2 — Containers
+
+*What are the deployable units, and how do they talk?*
+
+```mermaid
+flowchart LR
+  subgraph browser["Browser"]
+    ui["sportz-ui\nNext.js App Router\nReact Query + Framer Motion"]
+  end
+  subgraph render["Render (Docker)"]
+    api["sportz\nExpress + ws\nsingle Node process"]
+  end
+  neon[("Neon Postgres\npooled connection")]
+
+  ui -->|"HTTPS / REST"| api
+  ui <-->|"WSS / WebSocket"| api
+  api -->|"Drizzle ORM over pg"| neon
+```
+
+The single most important structural fact: **REST and WebSocket share one HTTP server.** Express handles normal requests; an `upgrade` listener intercepts `/ws` connections before they reach Express and hands them to the `ws` server. One process, one port, one deployable container.
+
+## Level 3 — Components (Backend)
+
+*Inside the `sportz` container, what are the pieces?*
+
+```mermaid
+flowchart TB
+  http["http.createServer"]
+  app["createApp()\nExpress app"]
+  mw["securityMiddleware\n(Arcjet)"]
+  matches["matchRouter\n/matches"]
+  commentary["commentaryRouter\n/matches/:id/commentary"]
+  ws["attachWebSocketServer\nsubscription registry + broadcast"]
+  db["db (Drizzle)\npg Pool"]
+
+  http --> app
+  http --> ws
+  app --> mw --> matches
+  mw --> commentary
+  matches --> db
+  commentary --> db
+  matches -. "broadcastMatchCreated" .-> ws
+  commentary -. "broadcastCommentary" .-> ws
+```
+
+The broadcast functions are created inside `attachWebSocketServer()` and injected onto `app.locals`, so the REST routes can trigger a WebSocket broadcast without importing the WS module directly. This is the seam that connects "data was written" to "tell the clients."
+
+## Level 4 — Code
+
+*The seam, in actual code.* When a commentary event is posted:
+
+```ts
+// routes/commentary.ts — after a successful insert
+const [event] = await db.insert(commentary).values({ ...body, matchId }).returning();
+
+if (res.app.locals.broadcastCommentary) {
+  res.app.locals.broadcastCommentary(matchId, event);  // ← REST triggers WS
+}
+res.status(201).json({ data: event });
+```
+
+```ts
+// ws/server.ts — broadcast only to clients subscribed to this match
+function broadcastToMatch(matchId: number, payload: WsPayload): void {
+  const subscribers = matchSubscribers.get(matchId);
+  if (!subscribers) return;
+  const message = JSON.stringify(payload);
+  for (const client of subscribers) {
+    if (client.readyState === WebSocket.OPEN) client.send(message);
+  }
+}
+```
+
+## Scalability — what changes as load grows
+
+The architecture above is correct for its current scale. Here is what breaks first, and when:
+
+| Scale | What holds | What breaks first |
+|---|---|---|
+| **10–1k concurrent** | Everything. One process handles REST + WS comfortably. | Nothing. |
+| **1k–10k** | Single process still fine; Neon pooled connection handles it. | Watch the pg pool size and WS memory (each connection holds a `Set` of subscriptions). |
+| **10k–100k** | — | **In-process broadcast.** You'll want multiple API instances for CPU/availability, and the moment you have two, a client on instance A won't receive an event created on instance B. |
+| **100k+** | — | Need a **pub/sub backbone** (Redis pub/sub or similar): each instance publishes broadcasts to a channel, every instance relays to its own local subscribers. This is the first piece of "missing" infrastructure that becomes mandatory. |
+
+The key insight for an interview or a design review: **the synchronous in-process broadcast is not a flaw — it's the right choice until you horizontally scale the API.** Adding Redis before then is premature complexity.
