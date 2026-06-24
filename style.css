@@ -1,0 +1,50 @@
+/* =============================================================================
+   Custom CSS — Sportz docs   (Mintlify auto-loads .css files in the repo root)
+   =============================================================================
+   Goal: ONE divider, edge-to-edge, directly under the navbar (search) row,
+   WITHOUT altering the navbar's responsive spacing.
+
+   The native theme draws the line on an inset element (.flex-1) and also has a
+   second full-width line under the tabs (#navbar-transition). We remove both,
+   then draw a single edge-to-edge line via a full-bleed pseudo-element on the
+   navbar row. Using a pseudo-element (not a real border + margin override)
+   means we DON'T touch the row's mx-4 mobile spacing — earlier that override
+   jammed the logo/search to the screen edges on tablet/mobile.
+   Verified across mobile / tablet / desktop via browser inspection.
+   ============================================================================= */
+
+/* 1. Remove the lower full-width line that sat under the tabs */
+#navbar-transition {
+  border-bottom: none !important;
+}
+
+/* 2. Remove the native inset line on the navbar content row */
+#navbar .flex-1.border-b {
+  border-bottom: none !important;
+}
+
+/* 3. Draw one edge-to-edge line at the navbar row's bottom, layout untouched.
+      The pseudo is full-viewport-wide and centered, so it spans edge to edge
+      regardless of the row's responsive margins. */
+#navbar div.h-16 {
+  position: relative;
+}
+#navbar div.h-16::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 100vw;
+  border-bottom: 1px solid rgb(107 114 128 / 0.12);
+  pointer-events: none;
+}
+.dark #navbar div.h-16::after {
+  border-bottom-color: rgb(209 213 219 / 0.08);
+}
+
+/* Prevent the 100vw line from creating horizontal scroll (clip x, keep y for
+   dropdowns/menus which open downward). */
+#navbar {
+  overflow-x: clip;
+}
