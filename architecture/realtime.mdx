@@ -95,4 +95,8 @@ This interval is cleared by `close()` — which matters for tests (a dangling 30
 
 ## Known limitation at scale
 
-This entire mechanism is **in-process**. The `matchSubscribers` map lives in one Node process's memory. The moment you run a second API instance, a client connected to instance A will not receive an event created on instance B — because B's broadcast only reaches B's local map. The fix (a Redis pub/sub backbone) is documented as the first mandatory infrastructure addition in [System Architecture](/architecture/system). It is correctly **not** built yet.
+Sportz **already implements a pub/sub _pattern_**: clients subscribe to match rooms and the server publishes events to that room's subscribers (`subscribe` / `unsubscribe` / `broadcastToMatch` over the `matchSubscribers` map). That is textbook publish/subscribe — topics are match IDs, subscribers are sockets.
+
+The limitation is that this pub/sub is **in-process**: the `matchSubscribers` map lives in one Node process's memory. The moment you run a second API instance, a client connected to instance A will not receive an event created on instance B — because B's broadcast only reaches B's local map.
+
+Scaling past one instance therefore means **lifting the existing in-process pub/sub onto a distributed backbone** (e.g. Redis pub/sub, NATS, or Postgres `LISTEN/NOTIFY`): each instance publishes broadcasts to a shared channel, and every instance relays from that channel to its own local subscribers. This is documented as the first infrastructure addition in [System Architecture](/architecture/system) — and is correctly **not** built yet, because at a single instance the in-process version is the right, simplest choice.

@@ -107,6 +107,8 @@ The architecture above is correct for its current scale. Here is what breaks fir
 | **10–1k concurrent** | Everything. One process handles REST + WS comfortably. | Nothing. |
 | **1k–10k** | Single process still fine; Neon pooled connection handles it. | Watch the pg pool size and WS memory (each connection holds a `Set` of subscriptions). |
 | **10k–100k** | — | **In-process broadcast.** You'll want multiple API instances for CPU/availability, and the moment you have two, a client on instance A won't receive an event created on instance B. |
-| **100k+** | — | Need a **pub/sub backbone** (Redis pub/sub or similar): each instance publishes broadcasts to a channel, every instance relays to its own local subscribers. This is the first piece of "missing" infrastructure that becomes mandatory. |
+| **100k+** | — | Lift the existing pub/sub onto a **distributed backbone** (Redis pub/sub or similar): each instance publishes broadcasts to a shared channel, every instance relays to its own local subscribers. This is the first piece of "missing" infrastructure that becomes mandatory. |
 
-The key insight for an interview or a design review: **the synchronous in-process broadcast is not a flaw — it's the right choice until you horizontally scale the API.** Adding Redis before then is premature complexity.
+Note the nuance: Sportz **already has a pub/sub pattern** (subscribe to match rooms → broadcast to subscribers). What's missing is making that pub/sub **distributed** across instances. The change at 100k+ isn't "add pub/sub" — it's "move the pub/sub you already have from in-process memory to a shared backbone."
+
+The key insight for an interview or a design review: **the in-process broadcast is not a flaw — it's the right choice until you horizontally scale the API.** Adding a Redis backbone before then is premature complexity.
