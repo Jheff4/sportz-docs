@@ -29,6 +29,9 @@ Only animate transform and opacity — they're GPU-composited and don't trigger 
 <Accordion title="AnimatePresence with mode='popLayout' on the score — what problem does it solve?">
 When a score changes, the old number must exit while the new one enters. popLayout removes the exiting element from layout flow immediately so the entering one doesn't cause a layout shift / both occupying space. The `key={score}` is what tells AnimatePresence an element left and another arrived.
 </Accordion>
+<Accordion title="What does it mean for a color token to be 'theme-aware,' and when does a token NOT need to be?">
+Contrast is a relationship between a color and its background, so a color shown on a background that flips between themes must change with it. `--live` is #c81e1e in light, #f87171 in dark, because the 'Live' label sits on a card that flips white ↔ near-black — one fixed red can't meet 4.5:1 on both. A token on a fixed background (brand yellow on the always-yellow header) doesn't need to vary. The bug that taught this: a duplicate `--color-live` in `@theme` shadowed the theme-aware mapping, because CSS keeps the last declaration.
+</Accordion>
 </AccordionGroup>
 
 ## Backend
@@ -99,6 +102,15 @@ arcjet.ts throws at module-import time if ARCJET_KEY is missing. Any test import
 </Accordion>
 <Accordion title="Two real bugs were found by writing the WebSocket tests. What does that tell you?">
 A message-delivery race and a hung-timer (missing close()) — both surfaced only because the tests exercised the real socket lifecycle. Tests aren't just regression guards; writing them forces you through the real lifecycle and exposes latent design gaps (here, no clean shutdown path).
+</Accordion>
+<Accordion title="How is the frontend tested end to end, and what do those tests cover that the backend suite can't?">
+Playwright drives the real UI in Chromium: load the page, click Watch Live and assert the commentary panel fills, toggle dark mode, page through matches, and run an axe accessibility scan. The backend suite proves the API/SQL/socket are correct; the e2e suite proves a user actually sees and can do the right thing — rendering, interaction, theming, and a11y, which only exist in the browser.
+</Accordion>
+<Accordion title="Why do the e2e tests mock the network and run against a production build?">
+Two separate reasons. Mocking (page.route for REST, page.routeWebSocket for WS) removes the dependency on a cold, slow backend whose latency would non-deterministically change what renders. Running `next build && next start` (not `next dev`) removes flaky timeouts: dev compiles routes on first request, so fullyParallel serializes cold compiles past the 30s timeout — and the prod build is also what CI/Vercel actually ship, so you test reality. A dedicated port (3100) lets it coexist with the dev server.
+</Accordion>
+<Accordion title="You see e2e failures that are all timeouts, pass individually, and change which specs fail each run. How do you reason about that?">
+That triad is the signature of an environment/concurrency issue, not test-logic bugs. I'd confirm by running serially (--workers=1); if it goes green, contention is the cause. Here it was the dev server compiling routes under parallel load. The fix targets the environment (prod build + dedicated port), not the assertions. The meta-skill: distinguish flaky-by-environment from genuinely-wrong before touching test code.
 </Accordion>
 </AccordionGroup>
 

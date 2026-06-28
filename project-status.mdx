@@ -13,7 +13,7 @@ This page exists so the handbook never lies to you. Documentation that describes
 - **Validation** — every request body/query parsed with Zod
 - **Security middleware** — Arcjet (rate limiting, bot detection, shield) on HTTP and WS upgrade; Helmet headers; CORS
 - **Match status** — derived from `startTime`/`endTime` (scheduled → live → finished)
-- **Tests** — 95 Vitest tests: unit (validation, status), integration (routes against real Postgres), WebSocket (real socket pairs)
+- **Tests** — 95 Vitest tests on the backend (unit/integration/WebSocket) **plus** a Playwright end-to-end suite on the frontend (mocked REST + WS, accessibility scan), run against a production build. See [Testing](/operations/testing).
 - **CI/CD** — three GitHub Actions workflows (lint+format, tests, docker build/push)
 - **Containerization** — multi-stage Dockerfile, dev (Neon Local) and prod compose files
 - **Deploy** — Render Blueprint (Docker runtime)

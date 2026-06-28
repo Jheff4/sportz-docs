@@ -79,6 +79,9 @@ Providers that others depend on go outermost. Theme wraps everything (any provid
 <Accordion title="What breaks if you animate a card's height instead of using transform?">
 Animating height triggers layout recalculation and paint on every frame — janky, especially during high-frequency WS updates. transform/opacity are GPU-composited and skip layout/paint. The rule: never animate layout-affecting properties.
 </Accordion>
+<Accordion title="Why is the 'Live' label's color a theme-aware --live token rather than a fixed red?">
+Contrast is a relationship between text and its background, and the card background flips white ↔ near-black with the theme. One fixed red can't pass 4.5:1 on both — dark enough for white is too dark for near-black. So `--live` holds a different value per theme (#c81e1e light, #f87171 dark). Only colors on a fixed background (the always-yellow header) can be hardcoded.
+</Accordion>
 </AccordionGroup>
 
 ## Backend & real-time
@@ -120,6 +123,23 @@ Containers are ephemeral — file logs vanish on restart and (as ISSUE-002 showe
 </Accordion>
 </AccordionGroup>
 
+## Testing & quality
+
+<AccordionGroup>
+<Accordion title="The full e2e suite fails with timeouts, but every spec passes when you run it alone, and which specs fail changes between runs. What's the diagnosis?">
+An environment/concurrency problem, not broken test logic. The tell is the triad: timeouts + passes-individually + shifting failures. Here it was `next dev` compiling routes on first request — under fullyParallel, several cold compiles serialize past the 30s timeout. Running serially removes the contention (proves it), and the real fix is testing a production build.
+</Accordion>
+<Accordion title="Why do the Playwright tests run against `next build && next start` instead of `next dev`, and on port 3100?">
+A prod build serves pre-compiled routes instantly, so parallel requests don't queue (no flaky timeouts), and it's the exact build CI/Vercel ship — you test what users run, not dev-only behavior. The dedicated port 3100 (with reuseExistingServer:false) keeps the test server off the dev server's 3000, so they coexist and the suite never silently reuses a flaky dev server.
+</Accordion>
+<Accordion title="Why mock the WebSocket with page.routeWebSocket instead of letting the test hit the real backend?">
+Determinism. A real socket to the cold free-tier backend makes the test depend on connection timing — e.g. whether the 'Connected' badge appears in time — so the same test passes or fails on network luck. Mocking at the network boundary makes the live path fully controlled, fast, and offline.
+</Accordion>
+<Accordion title="Why does the a11y scan wait for opacity:1 before running axe?">
+Mid-animation, the element's color is blended with the background, so axe computes a contrast ratio that isn't the real settled one and reports false positives. Scanning only after the entry animation finishes leaves only genuine violations.
+</Accordion>
+</AccordionGroup>
+
 ## Security & scaling
 
 <AccordionGroup>
@@ -134,5 +154,5 @@ It never helped cross-user load — it caches per-user repeat views. 10k users e
 ## Practical exercise
 
 <Note>
-Stand up the full stack locally: start the test Postgres, run migrations, run all 95 tests, then `npm run dev:docker` and POST a match + a commentary event with `curl` while watching a `wscat -c ws://localhost:8000/ws` connection receive the broadcast. If the event arrives in the socket, you've exercised the entire real-time path end to end.
+Stand up the full stack locally: start the test Postgres, run migrations, run all 95 backend tests, then `npm run dev:docker` and POST a match + a commentary event with `curl` while watching a `wscat -c ws://localhost:8000/ws` connection receive the broadcast. If the event arrives in the socket, you've exercised the entire real-time path end to end. Then, in `sportz-ui`, run `npm run test:e2e` and watch Playwright build a prod server on :3100 and drive the same path through the real browser — the front-to-back loop, both sides covered.
 </Note>

@@ -1,17 +1,18 @@
 ---
 title: "Testing Strategy"
-description: "What we test, how, and why — 95 tests across unit, integration, and WebSocket layers."
+description: "What we test, how, and why — 95 Vitest tests across the backend plus a Playwright end-to-end suite on the frontend."
 ---
 
-Sportz has **95 tests** (Vitest), split across three layers. Each layer answers a different question and runs against a different level of realness.
+Sportz tests both halves of the system. The **backend** has 95 Vitest tests across three layers; the **frontend** has a Playwright end-to-end suite that drives the real UI in a browser. Each layer answers a different question and runs against a different level of realness.
 
 ## The test pyramid, as built
 
-| Layer | Count (approx) | Runs against | Answers |
-|---|---|---|---|
-| **Unit** | ~55 | Pure functions, in memory | "Does this logic compute the right value?" |
-| **Integration** | ~27 | A **real** Postgres + the real Express app | "Do the routes, validation, and DB work together?" |
-| **WebSocket** | ~12 | A **real** WS server + real client sockets | "Does the live protocol behave correctly?" |
+| Layer | Count (approx) | Side | Runs against | Answers |
+|---|---|---|---|---|
+| **Unit** | ~55 | Backend | Pure functions, in memory | "Does this logic compute the right value?" |
+| **Integration** | ~27 | Backend | A **real** Postgres + the real Express app | "Do the routes, validation, and DB work together?" |
+| **WebSocket** | ~12 | Backend | A **real** WS server + real client sockets | "Does the live protocol behave correctly?" |
+| **End-to-end** | ~8 | Frontend | The real Next.js UI in a browser (Chromium) | "Does the user see and do the right thing?" |
 
 ## Unit tests — validation & status logic
 
@@ -33,6 +34,16 @@ These start a real `http.Server` on port 0 (OS-assigned free port), attach the r
 
 Two real bugs were found *by writing these tests* — a message race and a missing `close()` causing hung timers. Both are post-mortemed in [Issues](/issues).
 
+## End-to-end tests — Playwright against the real UI
+
+These drive the actual `sportz-ui` in a real Chromium browser: load the page, click "Watch Live," assert the commentary panel fills, toggle dark mode, page through matches, scan for accessibility violations. They verify the thing the backend tests can't — that a **user** sees and does the right thing.
+
+- **Mocked at the network boundary.** REST is stubbed with `page.route`, the WebSocket with `page.routeWebSocket`. List/scale data is generated from a template (`Array.from({ length: 8 }, ...)`). So the suite is deterministic and offline — it never depends on the cold free-tier backend, whose latency would otherwise silently change what renders.
+- **Runs against a production build, on its own port.** `webServer` runs `npm run build && npm run start -- -p 3100` with `reuseExistingServer: false`. `next dev` compiles routes on first request, so under `fullyParallel` several cold compiles serialize and blow past the 30s test timeout — producing flaky failures that *shift between runs* and vanish when you run files individually. A prod build serves pre-compiled routes instantly (reliable in parallel) and is the exact build CI and Vercel ship. The dedicated port (separate from `next dev`'s 3000) lets the dev server and test server coexist with no collision.
+- **Accessibility is part of the suite.** `@axe-core/playwright` scans the settled page (after the entry animation reaches `opacity: 1`, to avoid mid-animation false positives) for `wcag2a`/`wcag2aa` violations. Writing this caught two real contrast bugs — a theme-token that wasn't theme-aware and a status pill that broke the established `-700`-on-`-50` pattern (see [Issues](/issues)).
+
+The diagnostic lesson worth keeping: failures that **move between runs, pass individually, and are all timeouts** point at an environment/concurrency problem, not broken test logic.
+
 ## Running the tests
 
 ```bash
@@ -50,11 +61,16 @@ npm test
 npm run test:coverage
 ```
 
-CI runs the full suite against a `postgres:16-alpine` **service container** — fast, free, deterministic, and identical to the local throwaway DB. See [DevOps](/operations/devops).
+```bash
+# Frontend end-to-end (in sportz-ui) — builds a prod server on :3100 automatically
+npm run test:e2e          # headless
+npm run test:e2e:ui       # Playwright UI mode, for inner-loop debugging
+```
+
+CI runs the backend suite against a `postgres:16-alpine` **service container** — fast, free, deterministic, and identical to the local throwaway DB. See [DevOps](/operations/devops).
 
 ## Not yet built
 
-- **E2E (Playwright)** on the frontend — planned; the highest-value next addition.
 - **Contract testing** between frontend and backend types.
 - **Load testing** (k6/Artillery) of the WS server under thousands of concurrent subscribers — relevant before any real scale.
 - **Visual regression** — relevant once the UI stabilizes.

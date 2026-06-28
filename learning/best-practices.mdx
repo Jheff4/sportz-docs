@@ -1,0 +1,202 @@
+---
+title: "Best Practices"
+description: "The engineering practices Sportz actually follows — frontend and backend — each tied to real code and the reason behind it."
+---
+
+These are practices the codebase actually follows, not a generic checklist. Every entry points at real Sportz code and explains *why* — so it doubles as interview prep: you can speak to a decision you can also show. It spans both halves of the system, because both halves are what this handbook documents.
+
+A few principles recur across everything below — recognising them is more valuable than memorising the list:
+
+- **Reject early, reject cheaply.** Each layer is a gate; bad input dies at the first one it hits.
+- **One source of truth.** Don't keep two copies of state in sync — derive, or funnel both into one store.
+- **Decouple through seams.** Modules talk through narrow, injected interfaces, not direct imports.
+- **Mock the external dependency, keep the thing under test real.**
+- **Pay for infrastructure when a measured limit demands it, not before** (see [Project Status](/project-status)).
+
+---
+
+## React
+
+### Memoize a list item, but only with a comparator that matches reality
+`MatchCard` is wrapped in `React.memo` with a **custom comparator** checking just the fields that affect its output (`id`, `homeScore`, `awayScore`, `status`, `isActive`, `index`).
+
+- **Why.** A WebSocket score update rewrites the `['matches']` cache; the parent re-renders and hands *new object references* to every card, so a default shallow `memo` would still re-render all of them. The comparator compares the relevant fields *by value*, so only the changed card re-renders (~60% fewer renders during an active match).
+- **Gotcha.** `memo` only helps when there are **siblings that didn't change**. With a single card, the clicked card always changes `isActive`, so it always re-renders — correct, not a bug. Don't reach for `memo` until there's a real list.
+
+### `useCallback` for callbacks passed into memoized children
+`handleWatch` is `useCallback(() => onWatch(id), [id, onWatch])`.
+
+- **Why.** A memoized child stays memoized only if its props are referentially stable; an inline arrow is a new function each render. `useCallback`/`useMemo` earn their keep at a memo boundary or an effect dependency — sprinkled elsewhere they're cost without benefit.
+
+### Guard client-only state against hydration mismatch
+The dark-mode toggle renders nothing until a `mounted` flag flips in `useEffect`.
+
+- **Why.** The theme lives in `localStorage`, which the server can't read. Rendering one icon on the server and another on the client is a hydration mismatch — deferring to after mount makes the first client render match the server's.
+
+### One orchestrator, not Context or a global store, for one shared pivot
+`page.tsx` owns `activeMatchId` and wires the three hooks together.
+
+- **Why.** Context re-renders every consumer on any change; a global store is overhead for a single page. For one shared pivot, an orchestrator component is the simplest correct choice — the documented growth path is `useSportzApp()` then a store, in that order ([Frontend](/architecture/frontend)).
+
+---
+
+## Next.js & data
+
+### One cache as the single source of truth for REST *and* real-time
+WebSocket events are written into the React Query cache with `setQueryData` — the same cache the REST fetch fills.
+
+- **Why.** REST (initial load) and the socket (live updates) feed one store, so there's no reconciliation layer. This replaced ~50 lines of hand-rolled `useState`/`useEffect`/`AbortController` per hook ([ADR-003](/decisions)). `refetchOnWindowFocus` is off because the socket already keeps data fresh.
+
+### Gate dependent queries with `enabled`
+The commentary query uses `enabled: matchId !== null`.
+
+- **Why.** It doesn't fire until a match is selected — no wasted `/matches/null/commentary` request, no flash of empty state.
+
+### Client components by intent, not by default
+Interactive, socket-driven surfaces are `'use client'`; the App Router still handles routing/layout.
+
+- **Why.** Server Components shine for render-once content; they'd fight a model where the client holds the live socket and is the source of live truth. A deliberate fit-to-purpose choice ([Frontend](/architecture/frontend)).
+
+---
+
+## Animation & performance
+
+### CSS for always-on motion, Framer Motion for event-driven motion
+The "Connected" pulse is pure CSS `@keyframes`; score flips and new-event entrances use Framer Motion.
+
+- **Why.** The pulse runs the whole session — a JS animation would hold a `requestAnimationFrame` loop the entire time; CSS runs on the compositor for free. Framer Motion is reserved for discrete events where `AnimatePresence` enter/exit pays off.
+
+### Only animate `transform` and `opacity`
+Never `width`/`height`/`top`/`box-shadow`.
+
+- **Why.** Layout/paint properties recalculate every frame — janky, especially during high-frequency WS updates. `transform`/`opacity` are GPU-composited. And `useReducedMotion` disables motion for users who request it (accessibility, not optional).
+
+---
+
+## Accessibility
+
+### Color tokens shown on a flipping background must be theme-aware
+`--live` holds a different value per theme (`#c81e1e` light, `#f87171` dark) because the "Live" label sits on a card that flips white ↔ near-black.
+
+- **Why.** Contrast is a *relationship* between text and background, not a property of the color. One fixed value can't meet `4.5:1` on both backgrounds. Only colors on a *fixed* background (brand yellow on the always-yellow header) can be hardcoded.
+- **Gotcha that bit us.** A token can have theme-aware values and still render wrong if a later declaration overrides it — a duplicate `--color-live` in `@theme` shadowed the `var(--live)` mapping. CSS keeps the last declaration ([Issues](/issues)).
+
+### When one variant breaks a pattern the others follow, that's the bug
+Status pills use dark `-700` text on a pale `-50` background; the "Connected" pill had drifted to mid-tone `text-connected` (2.17:1) and was fixed to `text-green-700`.
+
+- **Why.** Consistency across variants *is* the accessibility check — the outlier is almost always the defect.
+
+### Name interactive elements; reflect disabled state with ARIA
+Buttons carry descriptive `aria-label`s; the pagination "Next" control uses `aria-disabled="true"`, not the `disabled` attribute.
+
+- **Why.** `aria-disabled` keeps the element focusable and announced (discoverable by screen-reader users); `disabled` removes it from the tab order. Choose by whether the control should stay discoverable.
+
+---
+
+## Backend & API design
+
+### Separate "build the app" from "run the app"
+`createApp()` constructs Express without `server.listen()`; `index.ts` does the listening.
+
+- **Why.** Supertest can drive the app object in-memory with no port bound, so the whole route layer is testable and two test files never collide on a port ([Backend](/architecture/backend)).
+
+### Order the gates to reject early and cheaply
+Request lifecycle: Arcjet → Zod → Drizzle → broadcast.
+
+- **Why.** A request failing Arcjet never reaches Zod; one failing Zod never touches the DB. Each gate rejects a class of bad traffic before the next spends resources on it ([Security](/operations/security)).
+
+### Parse defensively at the boundary — one bad client must not crash the server
+`handleMessage` wraps `JSON.parse` in try/catch and replies `{ type: 'error' }` instead of throwing.
+
+- **Why.** A single malformed WS frame must never take down the process or affect other clients. Validate/parse untrusted input at the edge.
+
+### Derive, don't store, what the clock owns
+`getMatchStatus` derives `scheduled/live/finished` from `startTime`/`endTime` relative to now.
+
+- **Why.** A stored status drifts out of sync with reality (a "live" match whose `endTime` passed). Deriving makes the timestamps the single source of truth.
+
+### Decouple layers through an injected seam
+Routes don't import the WS module; `attachWebSocketServer()` returns broadcast functions placed on `app.locals`, which routes call behind an existence check.
+
+- **Why.** The route just says "something happened"; the seam connects it to "tell the clients." Either side can change without touching the other.
+
+### Give long-lived resources a `close()`/shutdown path
+`attachWebSocketServer` returns `close()` that clears the heartbeat interval and closes the server.
+
+- **Why.** `setInterval` keeps the Node process alive — without clearing it the test suite hung ([Issues](/issues)). The same seam is the building block for graceful SIGTERM handling.
+
+---
+
+## Data & persistence
+
+### Parameterized queries by construction, not by sanitizing
+All queries go through Drizzle; user input is never string-concatenated into SQL.
+
+- **Why.** SQL injection is closed off structurally. The only raw SQL (the test `TRUNCATE`) takes no user input.
+
+### Let the database enforce integrity
+A `commentary.matchId → matches.id` FK with cascade rejects orphan inserts (PG `23503`).
+
+- **Why.** Integrity lives in one place the application can't bypass. (The known 404-vs-500 reporting gap on this path is deliberately documented, not silently patched — [Issues](/issues).)
+
+---
+
+## Testing
+
+The full layer-by-layer breakdown is in [Testing Strategy](/operations/testing). The cross-cutting practices:
+
+### Mock the external network dependency; keep the thing under test real
+Backend: Arcjet (a real network call) is mocked; Postgres is real. Frontend e2e: REST/WS are mocked at the network boundary (`page.route`, `page.routeWebSocket`).
+
+- **Why.** Mocking the DB would test the mock, not the SQL/schema/constraints. Mocking Arcjet/the backend removes flaky, slow, quota-consuming external calls. Mock what you don't own; keep real what you're actually verifying.
+
+### Make test data and state deterministic
+Backend resets with `TRUNCATE ... RESTART IDENTITY CASCADE` per test; e2e generates list data from a template (`Array.from({ length: 8 }, ...)`).
+
+- **Why.** `RESTART IDENTITY` resets serial IDs to 1 so assertions like `expect(id).toBe(1)` aren't execution-order-dependent. Generated data lets scale/pagination tests run without a live backend.
+
+### Set up env and mocks before imports that run at import time
+`tests/setup/mock-arcjet.ts` sets env vars and mocks Arcjet *before* any import.
+
+- **Why.** `arcjet.ts` throws at module-import time if `ARCJET_KEY` is missing; a setup file runs before test files' imports are evaluated.
+
+### Prefer user-facing locators; scope to beat strict mode
+`getByRole` → `getByLabel` → `getByText` → `getByTestId`. When text appears twice (desktop panel + hidden mobile sheet), scope: `getByTestId('commentary-panel').getByText(...)`.
+
+- **Why.** Role/label locators assert what a user (and assistive tech) perceives, so they double as a11y checks and survive refactors. `getByTestId` is the escape hatch.
+
+### Use web-first assertions; never poll or sleep
+`toHaveClass`, `toHaveAttribute`, `toHaveCSS` auto-retry. Know the layered budgets: **30s** per test, **5s** per `expect(locator)`, plus the **180s** server-startup budget in `playwright.config.ts`.
+
+### Run a11y scans on a settled page
+The axe scan waits for the entry animation to reach `opacity: 1` before running, scoped to `wcag2a`/`wcag2aa`.
+
+- **Why.** Mid-animation, colors blend with the background and axe reports false-positive contrast failures.
+
+### Test the production build, on its own port
+`webServer` runs `npm run build && npm run start -- -p 3100`, `reuseExistingServer: false`.
+
+- **Why.** `next dev` compiles routes on first request; under `fullyParallel`, cold compiles serialize past the 30s timeout, producing *shifting* failures that vanish when run individually. A prod build serves instantly (reliable in parallel) and is the exact build CI/Vercel ship. The dedicated port lets the dev server (`:3000`) and test server (`:3100`) coexist.
+- **The tell.** Failures that move between runs, pass individually, and are all timeouts = an environment/concurrency problem, not broken test logic.
+
+---
+
+## Operations
+
+### Log to stdout in containers
+Production logs to console only; file transports are dev-only.
+
+- **Why.** Container filesystems are ephemeral — file logs vanish on restart and a non-writable path can crash startup ([Issues](/issues)). stdout is the platform's durable log surface.
+
+### Never commit secrets; inject per environment
+`.env*` is gitignored (only `.env.*.example` tracked); prod injects via the host dashboard (`sync:false`); CI uses Actions secrets; the image never bakes them in.
+
+### Order Docker layers least- to most-frequently-changing
+Copy `package*.json` and `npm ci` *before* copying source; build multi-stage (builder → runner) and run as non-root.
+
+- **Why.** `npm ci` re-runs only when manifests change, not on every code edit. The runner stage ships only `dist/` + prod deps — smaller image, lower attack surface ([DevOps](/operations/devops)).
+
+### Decide fail-open vs fail-closed deliberately
+The HTTP path catches Arcjet errors and returns `503` (fails closed).
+
+- **Why.** For a security gate, denying traffic when the gate is down is defensible — but it couples availability to Arcjet. The point is that this is a *chosen* tradeoff, not an incidental one ([Staff Interview](/interview/staff)).

@@ -37,6 +37,12 @@ It's a classic build-vs-buy. Mintlify: zero config, polished instantly, but a 'P
 <Accordion title="React Query caches client-side. When is that the wrong layer to cache at?">
 Client cache helps a single user's repeat views. It does nothing for cross-user load on a hot endpoint — 10k users each cold-fetching the same match list still hammer the DB. That's when a server-side cache (Redis) earns its place. The tradeoff is cache invalidation complexity and an extra moving part; you pay it only when measurements show the DB is the bottleneck, not preemptively.
 </Accordion>
+<Accordion title="Mocked vs real-backend end-to-end tests — how do you stage e2e realness without trading away reliability?">
+Treat realness as a ladder, each rung a different question. Rung 1 (the default, in CI): mock REST/WS at the network boundary so the suite is deterministic, fast, and offline — it answers 'does the UI behave given a contract.' Rung 2: run the same specs against a locally-running real backend to catch contract drift. Rung 3: a thin smoke subset against the deployed environment to catch infra/config issues. The same spec files point at each via `PLAYWRIGHT_BASE_URL`. Keep the high-realness rungs small and out of the fast feedback loop — they trade determinism for coverage, so they belong in nightly/pre-release, not on every push. The principle: don't make one test tier carry two jobs; let each rung answer its own question.
+</Accordion>
+<Accordion title="A team's e2e suite is chronically flaky and people have started re-running CI until it's green. How do you lead the fix?">
+First reframe: 'rerun until green' is the team silently accepting that a failure carries no signal — the real cost is that a genuine regression now hides in the noise. Diagnose the class of flake before patching symptoms: ours was environment (dev-server compilation under parallelism), provable by a serial run going green — fixed at the environment (prod build + isolated port), not by sprinkling retries or waits. Establish the norm that flakiness is a P-class bug, mocked-at-the-boundary is the default for determinism, and `retries` exists to absorb rare true-flake, not to mask a structural one. The leadership move is restoring trust that red means red.
+</Accordion>
 </AccordionGroup>
 
 ## Incident response
@@ -77,6 +83,6 @@ Validate the instinct, then redirect with principle: infrastructure is added whe
 Document the why and the non-obvious: decisions with alternatives (ADRs), real failures (post-mortems), and the gap between what exists and what doesn't (project status). Don't document what the code already states clearly. The test: would a competent engineer reconstruct this reasoning from the code alone? If no (a tradeoff, a deferred fix, a scale trigger), document it. Sportz's handbook is built on exactly this split.
 </Accordion>
 <Accordion title="You inherit Sportz with no original authors available. What gives you confidence to change it?">
-Three things, all present: a test suite that fails loudly on regressions (95 tests across unit/integration/WS), a decision log explaining why things are the way they are (so I don't 'fix' a deliberate choice), and post-mortems documenting how it behaves under failure. That triad — tests, decisions, failures — is what makes a system safely evolvable by strangers. It's the explicit design goal of this handbook.
+Three things, all present: a test suite that fails loudly on regressions (95 backend tests across unit/integration/WS, plus a Playwright e2e + a11y suite covering the UI), a decision log explaining why things are the way they are (so I don't 'fix' a deliberate choice), and post-mortems documenting how it behaves under failure. That triad — tests, decisions, failures — is what makes a system safely evolvable by strangers. It's the explicit design goal of this handbook.
 </Accordion>
 </AccordionGroup>

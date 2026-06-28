@@ -107,3 +107,17 @@ Each record follows the same shape: **Context → Decision → Alternatives → 
 **Tradeoffs.** A third-party dependency and network call per request (mocked in tests so the suite stays fast and offline), in exchange for layered protection out of the box.
 
 **Revisit when.** If the per-request latency or vendor dependency becomes a concern, the rate-limit piece could move in-process.
+
+---
+
+## ADR-008 — Playwright for frontend E2E, run against a production build
+
+**Context.** The Vitest suite proves the backend (API, SQL, sockets) but nothing exercises what a user actually sees in a browser — rendering, interaction, theming, accessibility.
+
+**Decision.** Playwright (Chromium) drives the real UI, with REST/WS mocked at the network boundary (`page.route`, `page.routeWebSocket`) and `@axe-core/playwright` scanning for WCAG violations. The `webServer` runs a **production build** (`next build && next start -- -p 3100`, `reuseExistingServer: false`) on a port separate from `next dev`.
+
+**Alternatives.** Cypress (heavier, no native multi-browser, weaker network/WS mocking). Testing against `next dev` (rejected — on-demand route compilation serializes under `fullyParallel` and causes flaky timeouts, and dev mode isn't what ships). Hitting the real backend (rejected — couples tests to a cold, slow, free-tier server, making renders non-deterministic).
+
+**Tradeoffs.** A ~10–20s production build before the suite (paid once; CI pays it anyway) in exchange for reliable parallelism and parity with what CI/Vercel ship. The dedicated port lets the dev and test servers coexist. Mocking means the suite doesn't catch frontend↔backend contract drift — that's a separate, higher-realness tier ([Testing](/operations/testing)).
+
+**Revisit when.** Add a small real-backend smoke tier (via `PLAYWRIGHT_BASE_URL`) for pre-release; add visual-regression once the UI stabilizes.
