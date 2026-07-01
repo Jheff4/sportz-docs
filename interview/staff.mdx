@@ -43,6 +43,9 @@ Treat realness as a ladder, each rung a different question. Rung 1 (the default,
 <Accordion title="A team's e2e suite is chronically flaky and people have started re-running CI until it's green. How do you lead the fix?">
 First reframe: 'rerun until green' is the team silently accepting that a failure carries no signal — the real cost is that a genuine regression now hides in the noise. Diagnose the class of flake before patching symptoms: ours was environment (dev-server compilation under parallelism), provable by a serial run going green — fixed at the environment (prod build + isolated port), not by sprinkling retries or waits. Establish the norm that flakiness is a P-class bug, mocked-at-the-boundary is the default for determinism, and `retries` exists to absorb rare true-flake, not to mask a structural one. The leadership move is restoring trust that red means red.
 </Accordion>
+<Accordion title="You Dockerized the backend. Why deploy the frontend to Vercel instead of a container, for consistency?">
+Consistency of tooling isn't the goal — fit-to-purpose is. The backend is a long-running stateful server (live WS connections, DB pool, no CDN story); a container fits it. The frontend is client-rendered and leans on infrastructure Vercel manages — global CDN, image optimization, per-PR preview URLs, TLS, scaling. Self-hosting it in a container means re-owning all of that for no benefit at this scale. So we keep a gated `standalone` Dockerfile for own-infra/compliance optionality (and learning), but Vercel is the live deploy. The staff skill is naming the dominant constraint per workload, not applying one deployment model uniformly. Revisit if data-residency/compliance or cost-at-scale makes self-hosting worth the re-owned complexity — the image is ready.
+</Accordion>
 </AccordionGroup>
 
 ## Incident response

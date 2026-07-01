@@ -67,3 +67,12 @@ This section teaches the technologies *through* Sportz. Each tech is leveled: **
 - **Intermediate.** Sportz layers them: unit (pure logic), integration (routes against a real Postgres), WebSocket (real socket pairs), and frontend E2E (Playwright with REST/WS mocked + an axe a11y scan). ([Testing](/operations/testing).)
 - **Senior.** Mock what you don't own, keep real what you verify (Arcjet mocked, DB real). Prefer user-facing locators and web-first assertions. The E2E suite runs against a **production build** on its own port — `next dev`'s on-demand compilation causes flaky timeouts under parallelism. ([ADR-008](/decisions).)
 - **Staff.** Realness is a ladder (mocked → local backend → deployed smoke) via `PLAYWRIGHT_BASE_URL`; don't make one tier carry two jobs. Treat flakiness as a P-class bug — `retries` absorbs rare true-flake, it doesn't excuse a structural one. Contract testing and visual regression are the next rungs.
+
+---
+
+## Deployment & CI/CD
+
+- **Beginner.** CI = automated checks on your code (lint, types, tests). CD = automatically shipping it. Sportz: backend → Render, frontend → Vercel.
+- **Intermediate.** Push → GitHub Actions run the checks; a platform deploys on merge. The frontend's `NEXT_PUBLIC_*` config is baked at **build** time, so changing it needs a redeploy. ([DevOps](/operations/devops).)
+- **Senior.** "Git push = deploy" is a generic PaaS model (Vercel, Render, Netlify, Heroku), not Vercel-specific. CI and CD are *independent* unless you connect them: **branch protection** on `main` (require checks + PR) is what makes CI gate production, because production deploys from `main`. ([ADR-009](/decisions).)
+- **Staff.** Pick the deploy model per workload (managed PaaS vs own-pipeline/containers) by naming the dominant constraint — convenience vs control/compliance. Keep high-realness checks (deployed smoke) out of the per-push loop; automate them post-deploy. Branch protection turns "we run CI" into "red blocks merge."

@@ -32,6 +32,15 @@ When a score changes, the old number must exit while the new one enters. popLayo
 <Accordion title="What does it mean for a color token to be 'theme-aware,' and when does a token NOT need to be?">
 Contrast is a relationship between a color and its background, so a color shown on a background that flips between themes must change with it. `--live` is #c81e1e in light, #f87171 in dark, because the 'Live' label sits on a card that flips white ↔ near-black — one fixed red can't meet 4.5:1 on both. A token on a fixed background (brand yellow on the always-yellow header) doesn't need to vary. The bug that taught this: a duplicate `--color-live` in `@theme` shadowed the theme-aware mapping, because CSS keeps the last declaration.
 </Accordion>
+<Accordion title="React 19's hooks rules flagged three patterns in this app. What were they and how did you fix them?">
+(1) set-state-in-effect — a `useEffect` that set the disconnect modal on wsStatus change; fixed by DERIVING (`wsStatus === 'disconnected' && !errorDismissed`) and moving reconnect side effects into a socket callback. (2) refs-in-render — reading `newEventIds.current` during render to flag "new" events; fixed by making it state passed as a prop (render must be pure; refs don't trigger re-renders). (3) immutability/use-before-declaration — the reconnect timer referenced `connect` inside its own definition; fixed with a `connectRef` so it calls the latest `connect`. All three "worked" only by relying on current render/closure timing; the rules make them correct under concurrent rendering.
+</Accordion>
+<Accordion title="Why does the theme toggle wait for resolvedTheme, and what's a hydration mismatch?">
+Hydration is React on the client attaching to server-rendered HTML — the first client render must match the server's output. The theme lives in localStorage (server can't read it), so rendering the theme-dependent icon on the first client render would differ from the server HTML → a mismatch, which React resolves by discarding and re-rendering (a flash + wasted SSR). Gating on next-themes' resolvedTheme (undefined until the client resolves it) defers that part until after hydration, so the first render matches. We avoid a manual `mounted` flag because that's a setState-in-effect.
+</Accordion>
+<Accordion title="A deployed Next.js app fetched from localhost in production. Diagnose.">
+NEXT_PUBLIC_* env vars are inlined into the bundle at build time, not read at runtime. The build ran without NEXT_PUBLIC_API_URL, so the code's localhost fallback got frozen in. The fix is to set the var in the deploy environment and REBUILD — on Vercel a redeploy, in Docker a new image with the right --build-arg. Saving the var without rebuilding changes nothing, because the value is already a string literal in the shipped JS.
+</Accordion>
 </AccordionGroup>
 
 ## Backend
@@ -142,6 +151,9 @@ A failing step normally stops the job, so you'd fix lint, push, then discover fo
 </Accordion>
 <Accordion title="Why build multi-arch (amd64 + arm64) images?">
 amd64 covers most cloud VMs; arm64 covers Apple Silicon and cheaper ARM cloud instances (Graviton). One tag works everywhere — Docker pulls the right architecture for the host. Build cache (type=gha) keeps the slower emulated build fast across runs.
+</Accordion>
+<Accordion title="How does CI actually gate the frontend's production deploy, given Vercel deploys on push?">
+Vercel's Git integration deploys whatever lands on main regardless of GitHub Actions — so CI doesn't gate the deploy directly. The gate is branch protection on main: require the three checks (Typecheck, E2E, Lint and Format) plus a PR, with admin bypass disabled. Now code only reaches main if CI is green, and since Vercel's production deploy comes from main, production is effectively CI-gated. PR preview deploys still run regardless — that's intentional, you want to preview WIP including failures. "Running CI" and "enforcing CI" are different things; the branch protection rule is the enforcement.
 </Accordion>
 </AccordionGroup>
 

@@ -121,3 +121,17 @@ Each record follows the same shape: **Context → Decision → Alternatives → 
 **Tradeoffs.** A ~10–20s production build before the suite (paid once; CI pays it anyway) in exchange for reliable parallelism and parity with what CI/Vercel ship. The dedicated port lets the dev and test servers coexist. Mocking means the suite doesn't catch frontend↔backend contract drift — that's a separate, higher-realness tier ([Testing](/operations/testing)).
 
 **Revisit when.** Add a small real-backend smoke tier (via `PLAYWRIGHT_BASE_URL`) for pre-release; add visual-regression once the UI stabilizes.
+
+---
+
+## ADR-009 — Frontend on Vercel (with a Docker image kept for learning/own-infra), CI gates production via branch protection
+
+**Context.** The frontend (`sportz-ui`, Next.js) needs a deploy target and a way to keep production from receiving unverified code.
+
+**Decision.** Deploy to **Vercel** via Git integration (push to `main` → production; PR → preview). Keep a gated `standalone` **Dockerfile** (`DOCKER_BUILD=1`) for own-infra/learning, but Vercel is the live deploy. Two CI workflows (lint+format; typecheck+Playwright e2e) plus **branch protection** on `main` requiring those checks and a PR — so CI effectively gates the production deploy.
+
+**Alternatives.** Dockerize the frontend and self-host on Render/Fly (rejected as the *primary* path — re-owns CDN, TLS, image optimization, preview URLs that Vercel manages for a client-rendered app; kept as a learning artifact). Wiring deploy into GitHub Actions via the Vercel CLI (rejected — loses zero-config Git integration; branch protection achieves the gating more simply). Gating on the Vercel check itself (rejected — couples code merges to deploy hiccups; CI checks are the right gate).
+
+**Tradeoffs.** Vercel is a managed dependency and `NEXT_PUBLIC_*` values bake at build (changing one needs a redeploy; `CORS_ORIGIN` on Render must list the Vercel origin). In exchange: managed CDN/edge, image optimization, per-PR previews, near-zero config. Branch protection means no more direct pushes to `main` — all changes flow through PRs.
+
+**Revisit when.** Compliance/data-residency or cost-at-scale demands self-hosting (the Docker image is ready); or previews need backend access (switch `CORS_ORIGIN` to a pattern/function match).

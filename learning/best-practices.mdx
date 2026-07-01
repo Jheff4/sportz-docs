@@ -28,10 +28,19 @@ A few principles recur across everything below — recognising them is more valu
 
 - **Why.** A memoized child stays memoized only if its props are referentially stable; an inline arrow is a new function each render. `useCallback`/`useMemo` earn their keep at a memo boundary or an effect dependency — sprinkled elsewhere they're cost without benefit.
 
-### Guard client-only state against hydration mismatch
-The dark-mode toggle renders nothing until a `mounted` flag flips in `useEffect`.
+### Guard client-only state against hydration mismatch — without a `setState`-in-effect
+The dark-mode toggle renders nothing until next-themes' `resolvedTheme` is defined.
 
-- **Why.** The theme lives in `localStorage`, which the server can't read. Rendering one icon on the server and another on the client is a hydration mismatch — deferring to after mount makes the first client render match the server's.
+- **Why.** The theme lives in `localStorage`, which the server can't read; rendering one icon on the server and another on the client is a **hydration mismatch** (server HTML ≠ first client render → React discards and re-renders, causing a flash). We *used* to gate on a `mounted` flag set in `useEffect`, but that's a `setState`-in-effect (see below) — so we gate on `resolvedTheme` instead, which next-themes resolves via *its own* internal update. Same hydration safety, no effect we own.
+
+### Follow React 19's hook rules — they catch real, timing-dependent bugs
+The `react-hooks` lint rules (React-Compiler-aware) flag patterns that *happen* to work in the current render order but break under re-ordering/concurrency. Three we hit and fixed:
+
+- **`set-state-in-effect`** → **derive instead.** Setting state synchronously in an effect forces a second render and often means you're storing what you could compute. Fix: the disconnect modal became `wsStatus === 'disconnected' && !errorDismissed` (derived), and reconnect side effects moved into a socket callback (`onReconnected`) — *where the external event actually happens*.
+- **`refs` (reading `ref.current` in render)** → **use state/props.** Render must be a pure function of props + state; refs are mutable and don't trigger re-renders, so reading one in render can show stale output. Fix: the "new event IDs" set moved from a ref to state, passed down as a prop.
+- **`immutability` (use-before-declaration)** → **a ref to the latest value.** The reconnect timer referenced `connect` inside its own definition; now it calls `connectRef.current()`, so it always invokes the current `connect` without a forward reference.
+
+The throughline: these make render pure and predictable, which is exactly what concurrent rendering and the compiler require. (See [Issues](/issues) for the before/after.)
 
 ### One orchestrator, not Context or a global store, for one shared pivot
 `page.tsx` owns `activeMatchId` and wires the three hooks together.
@@ -56,6 +65,11 @@ The commentary query uses `enabled: matchId !== null`.
 Interactive, socket-driven surfaces are `'use client'`; the App Router still handles routing/layout.
 
 - **Why.** Server Components shine for render-once content; they'd fight a model where the client holds the live socket and is the source of live truth. A deliberate fit-to-purpose choice ([Frontend](/architecture/frontend)).
+
+### Remember `NEXT_PUBLIC_*` is baked at build time, not read at runtime
+`NEXT_PUBLIC_API_URL` and friends are **inlined as string literals** into the JS bundle during `next build` (the browser has no env vars).
+
+- **Why it matters.** Changing the value later does nothing until you **rebuild** — on Vercel that's a redeploy, in Docker it's a new image with the right `--build-arg`. A live site silently hitting `localhost` is the classic symptom of a build that didn't have the var set. Non-prefixed env vars stay server-only and *are* read at runtime — only the `NEXT_PUBLIC_` ones get frozen into the client bundle ([ADR-009](/decisions)).
 
 ---
 
@@ -200,3 +214,8 @@ Copy `package*.json` and `npm ci` *before* copying source; build multi-stage (bu
 The HTTP path catches Arcjet errors and returns `503` (fails closed).
 
 - **Why.** For a security gate, denying traffic when the gate is down is defensible — but it couples availability to Arcjet. The point is that this is a *chosen* tradeoff, not an incidental one ([Staff Interview](/interview/staff)).
+
+### Gate production with branch protection, not just by running CI
+`main` requires the CI checks **and** a PR (admin bypass off); production deploys from `main`.
+
+- **Why.** Running CI ≠ enforcing it — an unprotected branch can merge red. With Git-integration CD (Vercel), the platform deploys whatever lands on `main` regardless of your CI, so the *branch* is where you gate: protect `main` → only green code merges → production is gated. PR previews stay ungated on purpose ([DevOps](/operations/devops)).

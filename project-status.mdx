@@ -14,10 +14,11 @@ This page exists so the handbook never lies to you. Documentation that describes
 - **Security middleware** — Arcjet (rate limiting, bot detection, shield) on HTTP and WS upgrade; Helmet headers; CORS
 - **Match status** — derived from `startTime`/`endTime` (scheduled → live → finished)
 - **Tests** — 95 Vitest tests on the backend (unit/integration/WebSocket) **plus** a Playwright end-to-end suite on the frontend (mocked REST + WS, accessibility scan), run against a production build. See [Testing](/operations/testing).
-- **CI/CD** — three GitHub Actions workflows (lint+format, tests, docker build/push)
-- **Containerization** — multi-stage Dockerfile, dev (Neon Local) and prod compose files
-- **Deploy** — Render Blueprint (Docker runtime)
-- **Frontend** — Next.js App Router app: match grid, commentary timeline, dark mode, animations, responsive bottom sheet, modals, skeletons
+- **CI/CD (backend)** — three GitHub Actions workflows (lint+format, tests, docker build/push)
+- **CI/CD (frontend)** — two GitHub Actions workflows (lint+format, typecheck+Playwright e2e) + Vercel deploy; `main` branch-protected to require the checks, so CI gates production. See [DevOps](/operations/devops).
+- **Containerization** — multi-stage backend Dockerfile (dev Neon Local / prod compose); a gated `standalone` Dockerfile for the frontend too
+- **Deploy** — backend on Render (Docker runtime); frontend on **Vercel** (live)
+- **Frontend** — Next.js App Router app: match grid, commentary timeline, dark mode, animations, responsive bottom sheet, modals, skeletons. Tooling: ESLint + Prettier + typecheck.
 
 ## 🟡 Wired but not yet active
 

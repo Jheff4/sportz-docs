@@ -44,6 +44,14 @@ These drive the actual `sportz-ui` in a real Chromium browser: load the page, cl
 
 The diagnostic lesson worth keeping: failures that **move between runs, pass individually, and are all timeouts** point at an environment/concurrency problem, not broken test logic.
 
+## Deployed smoke — the live stack (post-deploy)
+
+One spec (`e2e/smoke.deployed.spec.ts`, tagged `@deployed`) runs against the **real** deployed stack — the Vercel frontend talking to the Render backend, **no mocks**. It answers the one question mocking can't: *is the deployed system actually wired together?* Four read-only checks: the app loads → a real match renders (REST + CORS + baked API URL) → the WebSocket connects (the `wss://` upgrade through Render's proxy) → Watch Live opens the commentary panel.
+
+- **It's the top rung of the realness ladder** (mocked → … → deployed). Each rung answers its own question; we don't make one tier carry two jobs.
+- **Read-only and presence-based.** It never mutates production and never asserts exact data (real data changes) — only that things are *present* and *connected*. Generous timeouts absorb Render's free-tier cold start.
+- **Excluded from CI and the normal suite.** `npm run test:e2e` uses `--grep-invert @deployed`; the deployed spec runs only via `npm run test:e2e:deployed` (which sets `PLAYWRIGHT_NO_SERVER=1` + `PLAYWRIGHT_BASE_URL`). It's a *post-deploy* check, not a per-push gate — it hits live prod and depends on a cold server. Automating it after a Vercel deploy is a documented next step ([DevOps](/operations/devops)).
+
 ## Running the tests
 
 ```bash
@@ -63,8 +71,9 @@ npm run test:coverage
 
 ```bash
 # Frontend end-to-end (in sportz-ui) — builds a prod server on :3100 automatically
-npm run test:e2e          # headless
+npm run test:e2e          # mocked suite (excludes @deployed); what CI runs
 npm run test:e2e:ui       # Playwright UI mode, for inner-loop debugging
+npm run test:e2e:deployed # post-deploy smoke vs the LIVE Vercel + Render stack
 ```
 
 CI runs the backend suite against a `postgres:16-alpine` **service container** — fast, free, deterministic, and identical to the local throwaway DB. See [DevOps](/operations/devops).

@@ -80,8 +80,30 @@ laptop → git push → PR → CI (lint + tests) → review → merge to main
    → docker-build-and-push (image) + Render auto-deploy from main → production
 ```
 
+## Frontend CI/CD (sportz-ui)
+
+The frontend has its own pipeline, mirroring the backend's conventions.
+
+**CI — two GitHub Actions workflows:**
+
+1. **`lint-and-format.yml`** — ESLint + Prettier, both reported together with a gate (same pattern as the backend). Node 22 (matches the frontend's Dockerfile and Next 16).
+2. **`tests.yml`** — two parallel jobs: **Typecheck** (`tsc --noEmit`) and **E2E (Playwright)** (builds a production server on :3100 and runs the mocked suite + axe a11y scan). No database/service container — the e2e suite mocks REST/WS at the network boundary.
+
+**CD — Vercel (Git integration):** Vercel builds and deploys on every push to `main`, with a **preview deployment per PR**. This *is* the CD — there's no separate deploy workflow. `NEXT_PUBLIC_*` env vars are set in Vercel's project settings (they're baked at build time, so changing one requires a redeploy). `CORS_ORIGIN` on the Render backend must include the Vercel origin or the live site is blocked ([ADR-009](/decisions)).
+
+**Branch protection connects CI → CD.** `main` requires the three checks (`Typecheck`, `E2E (Playwright)`, `Lint and Format Check`) to pass **and** a pull request before merge, with admin bypass disabled. Since Vercel's *production* deploy comes from `main`, gating `main` effectively gates production — even though Vercel itself doesn't read CI. PR **preview** deploys still happen regardless (you want to preview WIP).
+
+```
+feature branch → push → PR → CI checks + Vercel PREVIEW deploy
+   → (merge blocked until checks green) → merge to main
+   → Vercel PRODUCTION deploy
+```
+
+**Dockerized too (optional).** The frontend has a `standalone` Dockerfile (gated behind `DOCKER_BUILD=1` so `next start` and Vercel are unaffected) for own-infra/learning use — but Vercel is the live deploy. Vercel fits a client-rendered app better (managed CDN, image optimization, preview URLs) than self-hosting a container would ([ADR-009](/decisions)).
+
 ## Not yet built
 
-- **Staging environment** — the workflows trigger on `staging` branch, but no staging deploy target is wired.
 - **Rollback automation** — Render keeps prior deploys (manual rollback in dashboard); no scripted rollback.
 - **Graceful shutdown** on deploy — SIGTERM currently drops WS connections uncleanly (`close()` exists as the building block; see [Backend](/architecture/backend)).
+- **Automated post-deploy smoke** — the deployed smoke test ([Testing](/operations/testing)) is run manually (`npm run test:e2e:deployed`); a workflow that runs it automatically *after* a Vercel deploy is a logical next step.
+- **Pre-commit enforcement** — lint/format are enforced today by the npm scripts (local, manual) and by CI as the merge gate. A **husky + lint-staged** pre-commit hook would auto-run `eslint --fix` + `prettier --write` on staged files so unformatted code can't even be committed, and **commitlint** would enforce a commit-message convention (Conventional Commits). Planned tooling, not yet wired.

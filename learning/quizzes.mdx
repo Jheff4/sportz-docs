@@ -82,6 +82,15 @@ Animating height triggers layout recalculation and paint on every frame — jank
 <Accordion title="Why is the 'Live' label's color a theme-aware --live token rather than a fixed red?">
 Contrast is a relationship between text and its background, and the card background flips white ↔ near-black with the theme. One fixed red can't pass 4.5:1 on both — dark enough for white is too dark for near-black. So `--live` holds a different value per theme (#c81e1e light, #f87171 dark). Only colors on a fixed background (the always-yellow header) can be hardcoded.
 </Accordion>
+<Accordion title="The lint rule flags `setState` in an effect. Why, and what do you do instead?">
+Setting state synchronously in an effect forces a second render (render → effect → setState → render) and usually means you're storing something derivable. Prefer deriving during render (the disconnect modal became `wsStatus === 'disconnected' && !errorDismissed`), or move the update into the callback of the real external event (reconnect side effects fire from the socket's onopen, not a status-watching effect). Effects are for syncing with external systems, not for reacting to state to set more state.
+</Accordion>
+<Accordion title="Why can't you read a ref's .current during render?">
+Render must be a pure function of props + state. A ref is mutable and changing it doesn't trigger a re-render, so reading .current in render can produce output that's stale or inconsistent with what React thinks it rendered. If a value affects rendering, it must be state or props; refs are for things render doesn't need (DOM nodes, timers, previous values) and are touched only in effects/handlers.
+</Accordion>
+<Accordion title="A deployed Next.js site is fetching from localhost. What happened?">
+NEXT_PUBLIC_* values are inlined into the JS bundle at build time, not read at runtime. The build ran without NEXT_PUBLIC_API_URL set, so the code's `?? 'http://localhost:8000'` fallback got frozen in. Fix: set the var in the deploy env and REBUILD (a Vercel redeploy / a Docker build with the right --build-arg) — changing it without rebuilding does nothing.
+</Accordion>
 </AccordionGroup>
 
 ## Backend & real-time
@@ -120,6 +129,12 @@ On first deploy the Neon Cloud DB has no schema, so every query fails with 'rela
 </Accordion>
 <Accordion title="Why prefer logging to stdout in production over file transports?">
 Containers are ephemeral — file logs vanish on restart and (as ISSUE-002 showed) can crash startup on permission errors. stdout is captured by the platform (Render) and is the only durable log surface in a container. Sportz logs to console-only in production, files only in dev.
+</Accordion>
+<Accordion title="CI runs on every push. Does that stop bad code reaching production?">
+Not by itself. Running CI ≠ enforcing it. With Vercel's Git-integration CD, the platform deploys whatever lands on main regardless of your GitHub Actions result. The gate is branch protection: require the CI checks + a PR on main (admin bypass off). Since production deploys from main, gating main gates production. PR previews stay ungated on purpose — you want to preview WIP.
+</Accordion>
+<Accordion title="Why isn't the deployed smoke test part of CI?">
+It hits the live prod stack (cold-starting free-tier backend, slow, non-deterministic), so running it on every push would be flaky and pointless. It's a post-deploy check, run manually via `npm run test:e2e:deployed` (excluded from the normal suite with --grep-invert @deployed). Automating it AFTER a deploy — not as a per-push gate — is the right home for it.
 </Accordion>
 </AccordionGroup>
 
