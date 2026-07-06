@@ -35,11 +35,14 @@ Contrast is a relationship between a color and its background, so a color shown 
 <Accordion title="React 19's hooks rules flagged three patterns in this app. What were they and how did you fix them?">
 (1) set-state-in-effect — a `useEffect` that set the disconnect modal on wsStatus change; fixed by DERIVING (`wsStatus === 'disconnected' && !errorDismissed`) and moving reconnect side effects into a socket callback. (2) refs-in-render — reading `newEventIds.current` during render to flag "new" events; fixed by making it state passed as a prop (render must be pure; refs don't trigger re-renders). (3) immutability/use-before-declaration — the reconnect timer referenced `connect` inside its own definition; fixed with a `connectRef` so it calls the latest `connect`. All three "worked" only by relying on current render/closure timing; the rules make them correct under concurrent rendering.
 </Accordion>
-<Accordion title="Why does the theme toggle wait for resolvedTheme, and what's a hydration mismatch?">
-Hydration is React on the client attaching to server-rendered HTML — the first client render must match the server's output. The theme lives in localStorage (server can't read it), so rendering the theme-dependent icon on the first client render would differ from the server HTML → a mismatch, which React resolves by discarding and re-rendering (a flash + wasted SSR). Gating on next-themes' resolvedTheme (undefined until the client resolves it) defers that part until after hydration, so the first render matches. We avoid a manual `mounted` flag because that's a setState-in-effect.
+<Accordion title="What's a hydration mismatch, and why guard the theme toggle with `mounted` and not `resolvedTheme`?">
+Hydration is React on the client attaching to server-rendered HTML — the first client render must match the server's output. The theme lives in localStorage (server can't read it), so rendering the theme-dependent icon on the first client render would differ from the server HTML → a mismatch, which React resolves by discarding and re-rendering (a flash + wasted SSR). The fix is a `mounted` flag set in useEffect: it's false on the server AND the first client render, flipping only after hydration — so both passes match. We tried gating on next-themes' `resolvedTheme` to avoid the setState-in-effect the lint rule flags, but that REINTRODUCED the mismatch — next-themes resolves resolvedTheme synchronously on the first client render, so it's defined on the client but not the server. The takeaway: resolvedTheme isn't hydration-safe; mounted is; and the react-hooks rule is a justified false positive we scope-disable here.
 </Accordion>
 <Accordion title="A deployed Next.js app fetched from localhost in production. Diagnose.">
 NEXT_PUBLIC_* env vars are inlined into the bundle at build time, not read at runtime. The build ran without NEXT_PUBLIC_API_URL, so the code's localhost fallback got frozen in. The fix is to set the var in the deploy environment and REBUILD — on Vercel a redeploy, in Docker a new image with the right --build-arg. Saving the var without rebuilding changes nothing, because the value is already a string literal in the shipped JS.
+</Accordion>
+<Accordion title="The score celebration fires on a 'score increase' rather than matching scoring event types. Why is that better?">
+The trigger compares the new total to the last known total for the watched match; if it went up, we celebrate. The alternative — a hand-maintained Set of scoring event types (GOAL, TRY, THREE_POINTER, SIX, GAME…) — works but is fragile: it's five sports' worth of types, and adding a sport or event means remembering to update the set or the celebration silently stops. Deriving from the score increase is sport-agnostic and needs no maintained list, and we already know the match's `sport` to pick the right ball. It's the same "derive from the real signal, don't maintain a parallel list" instinct. (Detected in a WS callback, not an effect, and it setState's the celebration there — a legitimate event-driven update, not a setState-in-effect.)
 </Accordion>
 </AccordionGroup>
 
@@ -80,6 +83,12 @@ A client can vanish without a clean close (laptop sleeps). The server pings ever
 </Accordion>
 <Accordion title="A goal is scored — trace it end to end.">
 POST /matches/:id/commentary → Arcjet → Zod → Drizzle insert returning the row → broadcastCommentary(matchId, row) → WS looks up that match's subscriber Set, sends only to them → client onmessage → onCommentary → setQueryData prepends to ['commentary', matchId] → new CommentaryEvent animates in (y:12→0). Unsubscribed clients get nothing.
+</Accordion>
+<Accordion title="A score changes — how does that differ from commentary, end to end?">
+PATCH /matches/:id/score → update the row → broadcastScoreUpdate(match) which goes to ALL clients (not a room), because the score shows on every grid's card. Client onScoreUpdate → updateMatch replaces the match in the ['matches'] cache by id → the card re-renders with the new score (its memo comparator watches homeScore/awayScore) → a sport-ball celebration fires if you're watching that match and the score went up. Replacing the whole match by id makes the update idempotent.
+</Accordion>
+<Accordion title="How do you keep the live feed from showing duplicates?">
+A WS event can also be in the initial REST batch (Watch Live fetches the latest 50 while an event for that match arrives), or be delivered twice. So addEvent/addMatch dedup by id before writing to the cache — unconditionally prepending would double the item and collide on the React key (the list keys by id). Replacing a match by id on a score update is idempotent for the same reason. (For guarding against *dropped* events, the general technique is to track the `sequence` and refetch on a gap — a heavier layer you add when delivery reliability demands it.)
 </Accordion>
 </AccordionGroup>
 

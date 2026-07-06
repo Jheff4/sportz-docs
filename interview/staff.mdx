@@ -46,6 +46,9 @@ First reframe: 'rerun until green' is the team silently accepting that a failure
 <Accordion title="You Dockerized the backend. Why deploy the frontend to Vercel instead of a container, for consistency?">
 Consistency of tooling isn't the goal — fit-to-purpose is. The backend is a long-running stateful server (live WS connections, DB pool, no CDN story); a container fits it. The frontend is client-rendered and leans on infrastructure Vercel manages — global CDN, image optimization, per-PR preview URLs, TLS, scaling. Self-hosting it in a container means re-owning all of that for no benefit at this scale. So we keep a gated `standalone` Dockerfile for own-infra/compliance optionality (and learning), but Vercel is the live deploy. The staff skill is naming the dominant constraint per workload, not applying one deployment model uniformly. Revisit if data-residency/compliance or cost-at-scale makes self-hosting worth the re-owned complexity — the image is ready.
 </Accordion>
+<Accordion title="DEMO_MODE runs an in-process simulator that writes to the DB and broadcasts directly, bypassing HTTP/Arcjet. Defend it, then state its limit.">
+Defensible for what it is: the goal is a portfolio demo that's always live for any visitor with zero external infra. Running in-process is the simplest thing that works, and bypassing the public HTTP gate is correct — Arcjet exists to throttle untrusted anonymous traffic, not a trusted first-party producer; you don't rate-limit yourself. The limit, stated honestly: co-locating the producer inside the web server is a demo shortcut. A real ingestion pipeline would be a DECOUPLED service (or a queue consumer) with its own service-level auth, so it scales and deploys independently of the API, and so a slow producer can't tie up request threads. The tell that you've outgrown it: needing more than one API instance, real (non-simulated) feeds, or backpressure control. The staff move is shipping the pragmatic version while naming exactly what would replace it and when.
+</Accordion>
 </AccordionGroup>
 
 ## Incident response
@@ -73,6 +76,9 @@ The HTTP path catches Arcjet errors and returns 503 — it fails closed (denies 
 </Accordion>
 <Accordion title="What's the failure mode of the heartbeat at scale, and how would you tune it?">
 30s ping to every client is O(connections) work every 30s on one thread. At 100k connections that's a measurable periodic stall. Tune: stagger pings across the interval, or offload to a worker, and consider raising the interval (trading faster ghost-reaping for less overhead). The principle: a constant-cost loop becomes a hotspot once the constant is large.
+</Accordion>
+<Accordion title="Matches use client-side pagination over a fetched top-100. Where does that break, and how would you fix it?">
+It breaks the moment there are more than ~100 matches — the app only ever fetches the 100 most-recent and paginates those in the browser, so older matches are simply unreachable (the route accepts only `limit`, no offset/cursor). It's the right call at demo scale (few matches, and it lets a WS-created match appear on page 1 with no refetch), but it doesn't scale. The fix is server-side **cursor (keyset) pagination**: `?limit=100&after=<createdAt|id>` → `WHERE createdAt < :cursor ORDER BY createdAt DESC`. Prefer cursor over `offset` specifically because this is a real-time feed — new matches are constantly inserted at the top, so offset pagination would drift (duplicates/skips between pages), while a fixed cursor anchor stays stable. The nuance to name: you'd keep the client-side/optimistic-insert behaviour for the live page and layer cursor pagination underneath for depth.
 </Accordion>
 </AccordionGroup>
 

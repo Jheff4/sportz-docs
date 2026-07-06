@@ -135,3 +135,45 @@ Each record follows the same shape: **Context → Decision → Alternatives → 
 **Tradeoffs.** Vercel is a managed dependency and `NEXT_PUBLIC_*` values bake at build (changing one needs a redeploy; `CORS_ORIGIN` on Render must list the Vercel origin). In exchange: managed CDN/edge, image optimization, per-PR previews, near-zero config. Branch protection means no more direct pushes to `main` — all changes flow through PRs.
 
 **Revisit when.** Compliance/data-residency or cost-at-scale demands self-hosting (the Docker image is ready); or previews need backend access (switch `CORS_ORIGIN` to a pattern/function match).
+
+---
+
+## ADR-010 — Live scores as a broadcast-to-all WebSocket event
+
+**Context.** The product promises real-time *scores* as well as commentary, but scores were only settable at match creation. A `PATCH /matches/:id/score` route + a WS message were needed.
+
+**Decision.** `PATCH /matches/:id/score` updates the row and calls `broadcastScoreUpdate(match)`, which emits `score_update` to **all** connected clients — not just subscribers of that match. The client handles it by replacing the match in the `['matches']` React Query cache, so its card re-renders (the `MatchCard` memo comparator already watches `homeScore`/`awayScore`).
+
+**Alternatives.** Room-scope it like commentary (rejected — the score is shown on the match card in *every* client's grid, not just for people who clicked Watch Live; room-scoping would leave other grids stale). Broadcast only the score delta rather than the whole match (rejected — sending the full row lets the client replace-by-id idempotently, which also de-risks drift).
+
+**Tradeoffs.** All-broadcast is marginally more traffic than room-scoping, but scores are low-frequency and the correctness (every grid stays live) is worth it. The whole-match payload is a few bytes more than a delta, bought back by simpler, idempotent client updates.
+
+**Revisit when.** If score updates ever became high-frequency per match, revisit payload size (deltas) — not a concern at this cadence.
+
+---
+
+## ADR-011 — DEMO_MODE: an in-process simulator for the live demo
+
+**Context.** The deployed app looks dead to a visitor unless something is continuously producing events. A portfolio demo needs to be "live" for anyone, any time, with no external producer running.
+
+**Decision.** When `DEMO_MODE=true` (set in `render.yaml`), the server runs an **in-process** simulator on boot: it keeps a few live matches across sports (per-sport *playbooks* with real clubs/players and rule-correct scoring), and on an interval writes commentary/score updates **directly via Drizzle** and calls the broadcast functions **directly**. Match lifecycle (full-time → fresh fixture) keeps scores realistic; pruning keeps the demo DB bounded.
+
+**Alternatives.** An external HTTP producer (the earlier `scripts/stream.ts`) — kept during dev, then removed: it duplicated data and had to fight Arcjet (`DRY_RUN`). A cron/worker hitting the API — more infra than a portfolio needs. Seeding static data once — not "live."
+
+**Tradeoffs.** In-process is the simplest thing that keeps the demo alive, and bypassing the HTTP layer legitimately skips Arcjet (a trusted producer shouldn't face public bot-detection). The honest caveat: co-locating the producer in the web server is a **demo shortcut** — a real ingestion pipeline would be a decoupled service/queue with its own service auth. It also writes continuously to the prod DB (mitigated by pruning).
+
+**Revisit when.** Real (non-simulated) match data arrives → replace the simulator with a proper decoupled ingestion path; or multi-instance scaling → the pub/sub backbone from [System Architecture](/architecture/system) applies.
+
+---
+
+## ADR-012 — driver.js for the onboarding tour
+
+**Context.** A recruiter opening the app needs orientation. We wanted a short guided walkthrough (live matches → Watch Live → commentary → status → theme), run once, replayable.
+
+**Decision.** Use **driver.js** (~5kb) for the spotlight + step flow. Steps target **existing selectors** (roles/aria-labels/test-ids) rather than threading `data-tour` attributes through components. It auto-runs once (a `localStorage` flag), is replayable via a header "?" button, filters out steps whose target isn't visible (so mobile skips the desktop-only panel), and is themed to the design tokens (dark-aware).
+
+**Alternatives.** A hand-rolled overlay + tooltip with Framer Motion (rejected as the default — spotlight positioning, resize, and mobile edge-cases are exactly what a small library already solves well; not worth the code). react-joyride (heavier for what we need).
+
+**Tradeoffs.** One small dependency + overriding its default popover CSS, in exchange for robust positioning we don't maintain. Note the important interaction with tests → see the guard in [Testing](/operations/testing).
+
+**Revisit when.** If the tour needs branching/analytics/multi-page flows, a heavier tour framework may earn its weight.

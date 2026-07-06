@@ -11,7 +11,7 @@ Base URL (local): `http://localhost:8000` · WebSocket: `ws://localhost:8000/ws`
 
 Returns matches, most-recent first.
 
-**Query** — `limit` (1–100, default 50).
+**Query** — `limit` (1–100, default 50). **No `offset`/cursor** — the endpoint only ever returns the most-recent window (the frontend fetches `limit=100` and paginates client-side). Paging past the top 100 would require cursor pagination — see [Frontend](/architecture/frontend). Not built.
 
 ```json
 { "data": [
@@ -26,6 +26,12 @@ Returns matches, most-recent first.
 Creates a match. `status` is **derived** from `startTime`/`endTime`, not supplied. Broadcasts `match_created` to all WS clients.
 
 **Body** — `sport`, `homeTeam`, `awayTeam`, `startTime` (ISO), `endTime` (ISO, must be after `startTime`); optional `homeScore`, `awayScore` (default 0). → `201 { data }`, or `400` on invalid input.
+
+### `PATCH /matches/:id/score`
+
+Sets a match's live score and broadcasts `score_update` to **all** WS clients (scores show on every client's grid card, so it's global, not room-scoped).
+
+**Body** — required `homeScore`, `awayScore` (non-negative ints). → `200 { data }` (the updated match), `400` on invalid id/body, `404` if the match doesn't exist.
 
 ### `GET /matches/:id/commentary`
 

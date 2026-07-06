@@ -7,8 +7,11 @@ This page exists so the handbook never lies to you. Documentation that describes
 
 ## ✅ Built and working
 
-- **REST API** — `GET/POST /matches`, `GET/POST /matches/:id/commentary`
-- **WebSocket server** — connect, subscribe/unsubscribe to a match, broadcast match-created and commentary events, 30s heartbeat
+- **REST API** — `GET/POST /matches`, `PATCH /matches/:id/score`, `GET/POST /matches/:id/commentary`
+- **WebSocket server** — connect, subscribe/unsubscribe to a match, broadcast match-created, **live score updates**, and commentary events, 30s heartbeat
+- **Live scores** — `PATCH /matches/:id/score` → `score_update` broadcast to all clients; the frontend replaces the match in cache and the card re-renders live. See [ADR-010](/decisions).
+- **Live-feed dedup** — WS cache writes dedup by id, so a live event that's also in the initial REST batch (or delivered twice) won't duplicate; score updates replace the match by id (idempotent).
+- **Demo mode** — `DEMO_MODE=true` runs an in-process multi-sport simulator (real clubs/players, rule-correct scoring, match lifecycle) so the deployed app is always live for visitors. It writes real rows to the DB continuously; **pruning** keeps it bounded (≈last 50 commentary per match, last 8 finished matches — old rows cascade-deleted). See [ADR-011](/decisions).
 - **Database** — Neon Postgres via Drizzle ORM; `matches` and `commentary` tables with a FK cascade
 - **Validation** — every request body/query parsed with Zod
 - **Security middleware** — Arcjet (rate limiting, bot detection, shield) on HTTP and WS upgrade; Helmet headers; CORS
@@ -18,7 +21,7 @@ This page exists so the handbook never lies to you. Documentation that describes
 - **CI/CD (frontend)** — two GitHub Actions workflows (lint+format, typecheck+Playwright e2e) + Vercel deploy; `main` branch-protected to require the checks, so CI gates production. See [DevOps](/operations/devops).
 - **Containerization** — multi-stage backend Dockerfile (dev Neon Local / prod compose); a gated `standalone` Dockerfile for the frontend too
 - **Deploy** — backend on Render (Docker runtime); frontend on **Vercel** (live)
-- **Frontend** — Next.js App Router app: match grid, commentary timeline, dark mode, animations, responsive bottom sheet, modals, skeletons. Tooling: ESLint + Prettier + typecheck.
+- **Frontend** — Next.js App Router app: match grid, commentary timeline, dark mode, animations, responsive bottom sheet (with a live scoreboard), modals, skeletons. Plus: per-sport tags + semantic event-type colors, a **score celebration** (sport-ball burst on a score-up in the watched match), an **onboarding tour** ([driver.js](/decisions), run-once + replayable), and a dismissible **demo banner** (simulated-live + cold-start notice). Tooling: ESLint + Prettier + typecheck.
 
 ## 🟡 Wired but not yet active
 

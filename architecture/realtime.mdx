@@ -16,10 +16,11 @@ Clients connect to `/ws` and speak a tiny JSON protocol:
 | Server → Client | `{ type: 'subscribed', matchId }` | Confirmation |
 | Client → Server | `{ type: 'unsubscribe', matchId }` | Leave a room |
 | Server → Client | `{ type: 'match_created', data }` | Broadcast to **all** clients |
+| Server → Client | `{ type: 'score_update', data }` | Broadcast to **all** clients |
 | Server → Client | `{ type: 'commentary', data }` | Broadcast to **subscribers of that match only** |
 | Server → Client | `{ type: 'error', message }` | Malformed input |
 
-The distinction matters: `match_created` is global (a new match should appear in everyone's grid), while `commentary` is room-scoped (only people watching match 5 care about match 5's commentary).
+The distinction matters: `match_created` and `score_update` are **global** — a new match and a changed scoreline both show on the match card in *everyone's* grid, so every client needs them. `commentary` is **room-scoped** — only people watching match 5 care about its ball-by-ball. Getting this wrong either way is a bug: room-scoping a score would leave other viewers' cards stale; broadcasting all commentary to everyone would waste bandwidth and leak unrelated matches.
 
 ## The subscription registry
 

@@ -87,6 +87,14 @@ export const pool = new Pool({
 
 The trap: `{ rejectUnauthorized: false }` still *attempts* SSL. Turning SSL off entirely requires `ssl: false`. Those look similar and behave completely differently.
 
+## Live scores
+
+`PATCH /matches/:id/score` updates the row and calls `broadcastScoreUpdate(match)`, which emits `score_update` to **all** connected clients — not the match's room — because the score is shown on every client's grid card ([ADR-010](/decisions), [Real-Time](/architecture/realtime)). Same injected-seam pattern as the other broadcasts: the route calls `res.app.locals.broadcastScoreUpdate`, wired in `index.ts`.
+
+## Demo mode
+
+When `DEMO_MODE=true` (set in `render.yaml`), `index.ts` starts an in-process simulator (`src/demo/`) so the deployed app is always live for visitors. It keeps a few live matches across sports (per-sport *playbooks* with real clubs/players and rule-correct scoring), and on an interval writes commentary/score updates **directly via Drizzle** and calls the broadcast functions **directly** — no HTTP hop, so no Arcjet to fight (a trusted first-party producer). Each event type has **several message templates** and the simulator avoids repeating the exact previous line (`pickMessage`), so distinct events don't read as identical. Match lifecycle (full-time → fresh fixture) keeps scores realistic; pruning bounds the DB. It's a deliberate demo shortcut — a real pipeline would decouple ingestion ([ADR-011](/decisions)).
+
 ## Failure modes
 
 | Failure | Current behavior | Honest assessment |

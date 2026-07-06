@@ -28,10 +28,11 @@ A few principles recur across everything below — recognising them is more valu
 
 - **Why.** A memoized child stays memoized only if its props are referentially stable; an inline arrow is a new function each render. `useCallback`/`useMemo` earn their keep at a memo boundary or an effect dependency — sprinkled elsewhere they're cost without benefit.
 
-### Guard client-only state against hydration mismatch — without a `setState`-in-effect
-The dark-mode toggle renders nothing until next-themes' `resolvedTheme` is defined.
+### Guard client-only state with a `mounted` flag — the one place `setState`-in-effect is correct
+The dark-mode toggle renders nothing until a `mounted` flag flips in `useEffect`.
 
-- **Why.** The theme lives in `localStorage`, which the server can't read; rendering one icon on the server and another on the client is a **hydration mismatch** (server HTML ≠ first client render → React discards and re-renders, causing a flash). We *used* to gate on a `mounted` flag set in `useEffect`, but that's a `setState`-in-effect (see below) — so we gate on `resolvedTheme` instead, which next-themes resolves via *its own* internal update. Same hydration safety, no effect we own.
+- **Why.** The theme lives in `localStorage`, which the server can't read; rendering one icon on the server and a different one on the first client render is a **hydration mismatch** (server HTML ≠ first client render → React discards and re-renders → a visible flash). `mounted` is `false` on the server **and** the first client render, flipping to `true` only *after* hydration — so both passes render identically (no toggle), then it appears. That's the canonical next-themes guard.
+- **The trap we hit:** we briefly "fixed" the `set-state-in-effect` lint warning by gating on next-themes' `resolvedTheme` instead. That **reintroduced the hydration mismatch** — next-themes resolves `resolvedTheme` *synchronously* on the first client render, so it's defined on the client but not the server → mismatch again ([Issues](/issues)). The lesson: **`resolvedTheme` is not hydration-safe; `mounted` is.** The `set-state-in-effect` rule is a *justified false positive* here — we keep the `mounted` effect and scope-disable the rule with a comment. Lint rules encode heuristics, not laws.
 
 ### Follow React 19's hook rules — they catch real, timing-dependent bugs
 The `react-hooks` lint rules (React-Compiler-aware) flag patterns that *happen* to work in the current render order but break under re-ordering/concurrency. Three we hit and fixed:
@@ -55,6 +56,16 @@ The throughline: these make render pure and predictable, which is exactly what c
 WebSocket events are written into the React Query cache with `setQueryData` — the same cache the REST fetch fills.
 
 - **Why.** REST (initial load) and the socket (live updates) feed one store, so there's no reconciliation layer. This replaced ~50 lines of hand-rolled `useState`/`useEffect`/`AbortController` per hook ([ADR-003](/decisions)). `refetchOnWindowFocus` is off because the socket already keeps data fresh.
+
+### Dedup live writes by id; make updates idempotent
+`addEvent`/`addMatch` skip the write if the id already exists; a score update replaces the whole match by id.
+
+- **Why.** REST and WS overlap — click Watch Live, the fetch returns the latest 50, and a WS event already in that batch arrives too. Prepending unconditionally would double the item *and* collide on the React key. Dedup-by-id and replace-by-id make the cache converge to the same state no matter how many times (or in what order) an event lands.
+
+### An incrementally-updated cache must handle removals, not just additions
+`addMatch` bounds the `['matches']` cache (`trimMatches`) — keep all live + the watched match, then newest finished up to a cap.
+
+- **Why.** When you keep a cache fresh with `setQueryData` on live events, you own *every* mutation. We handled the adds (`match_created`) but the backend also **prunes** — so the client's copy grew forever until a refetch (the "matches stack until refresh" bug). Mirror the server's bound on the client, or `invalidateQueries` and refetch. And protect the watched match from the trim, or it can vanish out from under the open panel. This is cache-consistency in miniature: incremental updates drift the moment a mutation type goes unhandled.
 
 ### Gate dependent queries with `enabled`
 The commentary query uses `enabled: matchId !== null`.
@@ -134,6 +145,11 @@ Routes don't import the WS module; `attachWebSocketServer()` returns broadcast f
 
 - **Why.** The route just says "something happened"; the seam connects it to "tell the clients." Either side can change without touching the other.
 
+### Match broadcast scope to who needs the data
+`commentary` goes to a match's room; `match_created` and `score_update` go to **all** clients.
+
+- **Why.** Scope should follow visibility. Commentary is only relevant to people watching that match. But a new match and a score change both appear on the card in *every* grid — room-scoping them would leave other clients stale, while broadcasting commentary to everyone would waste bandwidth and leak unrelated matches ([ADR-010](/decisions)).
+
 ### Give long-lived resources a `close()`/shutdown path
 `attachWebSocketServer` returns `close()` that clears the heartbeat interval and closes the server.
 
@@ -186,6 +202,11 @@ Backend resets with `TRUNCATE ... RESTART IDENTITY CASCADE` per test; e2e genera
 The axe scan waits for the entry animation to reach `opacity: 1` before running, scoped to `wcag2a`/`wcag2aa`.
 
 - **Why.** Mid-animation, colors blend with the background and axe reports false-positive contrast failures.
+
+### Suppress first-run UI in automated runs
+The onboarding tour skips auto-open under `navigator.webdriver`, and the mock setup pre-sets its "seen" flag via `page.addInitScript`.
+
+- **Why.** Playwright starts each spec with fresh `localStorage`, so a first-visit tour/banner would pop up in *every* test — its overlay covers the page and breaks the a11y scan and clicks. Any first-run popup needs a way to be off in automation. Two layers: a runtime guard (`navigator.webdriver`, which also covers the deployed smoke test) plus a deterministic flag set in test setup ([Testing](/operations/testing)).
 
 ### Test the production build, on its own port
 `webServer` runs `npm run build && npm run start -- -p 3100`, `reuseExistingServer: false`.

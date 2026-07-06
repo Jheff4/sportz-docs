@@ -91,6 +91,12 @@ Render must be a pure function of props + state. A ref is mutable and changing i
 <Accordion title="A deployed Next.js site is fetching from localhost. What happened?">
 NEXT_PUBLIC_* values are inlined into the JS bundle at build time, not read at runtime. The build ran without NEXT_PUBLIC_API_URL set, so the code's `?? 'http://localhost:8000'` fallback got frozen in. Fix: set the var in the deploy env and REBUILD (a Vercel redeploy / a Docker build with the right --build-arg) — changing it without rebuilding does nothing.
 </Accordion>
+<Accordion title="Why do the WS handlers dedup by id before writing to the React Query cache?">
+A live event can also be in the initial REST batch (you click Watch Live, the fetch returns the latest 50, and a WS event for that match arrives that was already in that batch) or be delivered twice. Prepending unconditionally would show it twice AND collide on the React key (the list keys by id). So addEvent/addMatch skip if the id already exists.
+</Accordion>
+<Accordion title="Matches kept stacking on screen until a refresh fixed it. What was wrong?">
+The client keeps its match cache fresh incrementally with setQueryData — but only the ADDS (match_created) were handled. The backend also PRUNES matches, and those removals were never reflected on the client, so its copy grew forever and only re-synced on a refetch (refresh). It's a cache-consistency bug: an incrementally-updated cache must handle removals too. Fix: bound the cache write (keep all live + the watched match + newest finished up to a cap), mirroring the backend's pruning — or invalidateQueries and refetch (trading "instant" for "always consistent").
+</Accordion>
 </AccordionGroup>
 
 ## Backend & real-time
@@ -104,6 +110,12 @@ handleMessage wraps JSON.parse in try/catch and replies `{ type: 'error', messag
 </Accordion>
 <Accordion title="Why does Arcjet run on the WebSocket upgrade, not just HTTP routes?">
 The upgrade handshake is an HTTP request before the socket opens — an unprotected upgrade would let bots open unlimited connections, exhausting memory (each holds a subscription Set). Arcjet on the upgrade applies a stricter sliding window (5 connections/2s) at exactly that chokepoint.
+</Accordion>
+<Accordion title="commentary is room-scoped but score_update is broadcast to ALL clients. Why the difference?">
+Commentary only matters to people watching that match (a room). But the score is shown on the match card in EVERY client's grid — so a score change must reach everyone, or other viewers' cards go stale. Room-scoping the score would be a bug; broadcasting all commentary to everyone would waste bandwidth and leak unrelated matches. The scope follows "who needs to see it." (See ADR-010.)
+</Accordion>
+<Accordion title="What does DEMO_MODE do, and why is it in-process instead of an external script hitting the API?">
+When DEMO_MODE=true the server runs a simulator that keeps live matches and emits commentary/score updates on an interval, so the deployed app is always live for visitors with no external producer. It's in-process — writing to the DB via Drizzle and calling the broadcast functions directly — so there's no HTTP hop and thus no Arcjet to fight (a trusted producer shouldn't face public bot-detection). The honest caveat: co-locating the producer is a demo shortcut; a real pipeline would be a decoupled service/queue. (See ADR-011.)
 </Accordion>
 </AccordionGroup>
 
@@ -153,6 +165,9 @@ Determinism. A real socket to the cold free-tier backend makes the test depend o
 <Accordion title="Why does the a11y scan wait for opacity:1 before running axe?">
 Mid-animation, the element's color is blended with the background, so axe computes a contrast ratio that isn't the real settled one and reports false positives. Scanning only after the entry animation finishes leaves only genuine violations.
 </Accordion>
+<Accordion title="The onboarding tour auto-opens on a first visit. Why would that break the e2e suite, and how is it prevented?">
+Playwright gives each spec a fresh context (empty localStorage), so to the tour every test looks like a first visit → it auto-opens a full-screen overlay that covers the page, breaking the a11y scan and blocking Watch-Live clicks. Prevented two ways: the app skips auto-open under automation (`navigator.webdriver` — which also protects the deployed smoke test), and the mock setup deterministically pre-sets the "seen" flag with `page.addInitScript`. General rule: any first-run popup must be suppressible in automated runs.
+</Accordion>
 </AccordionGroup>
 
 ## Security & scaling
@@ -163,6 +178,9 @@ Not today — CSRF exploits ambient credentials (cookies) on state-changing requ
 </Accordion>
 <Accordion title="At what user count does client-side React Query caching stop helping with DB load?">
 It never helped cross-user load — it caches per-user repeat views. 10k users each cold-loading the same match list still hit the DB 10k times. Server-side caching (Redis) addresses that, and only earns its place once measurements show the DB is the bottleneck.
+</Accordion>
+<Accordion title="Why does cursor pagination beat offset for a real-time match list?">
+Matches are fetched as a top-100 window and paginated client-side; scaling past 100 needs server-side pagination. In a real-time feed new rows are constantly inserted at the top, so OFFSET pagination drifts — `offset=100` points at different rows between requests, causing duplicates/skips. CURSOR (keyset) pagination anchors on a fixed value (`?after=<createdAt|id>` → `WHERE createdAt < :cursor`), so pages stay stable as new rows arrive. (Cursor pagination isn't built — the route accepts only `limit`.)
 </Accordion>
 </AccordionGroup>
 

@@ -96,6 +96,22 @@ The test setup defaults `DATABASE_SSL=false`. After the fix: 95/95 pass.
 
 ---
 
+## ISSUE-006 — Every `/matches` request returned 500, and the cause was invisible
+
+**Symptom.** Running the app locally, `GET /matches` and `POST /matches` returned `500` on every request; the UI showed nothing loading. No error text anywhere.
+
+**Investigation.** The 500s were consistent and fast (~150ms), which pointed at a per-request failure rather than a hang — but the **route's `catch` block swallowed the error** (`catch { res.status(500)... }` with no logging), so there was nothing to go on. Adding `logger.error(..., e)` to the matches route's catches surfaced the real error immediately.
+
+**Root cause.** Two layers: the immediate one was a **database connection failure** (a local Postgres SSL/URL mismatch); the *deeper* one was that the matches route **discarded the error**, making any DB/query problem undiagnosable. The commentary route already logged; matches didn't.
+
+**Resolution.** Added error logging to all matches-route catches, which revealed the DB config to fix. Kept the logging as a permanent improvement.
+
+**Lesson.** A bare `catch` that returns a generic 500 without logging turns any downstream failure into a black box. Log the error at the boundary even when you return a sanitized message to the client.
+
+**Prevention.** Every route `catch` logs the real error server-side (stdout in prod); the client still gets a generic message. Consistency across routes matters — the gap existed only because one router logged and another didn't.
+
+---
+
 <Note>
-The pattern across all five: **observe the real symptom → reproduce/measure with direct evidence → form a specific causal hypothesis → make the single change it predicts → verify the prediction.** No guessing. Each fix was confirmed by re-running the exact failure path, not assumed.
+The pattern across all six: **observe the real symptom → reproduce/measure with direct evidence → form a specific causal hypothesis → make the single change it predicts → verify the prediction.** No guessing. Each fix was confirmed by re-running the exact failure path, not assumed.
 </Note>

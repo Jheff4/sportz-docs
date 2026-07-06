@@ -10,7 +10,7 @@ This section teaches the technologies *through* Sportz. Each tech is leveled: **
 ## WebSockets
 
 - **Beginner.** A persistent two-way connection between browser and server. Unlike HTTP (request → response → done), it stays open so the server can push data without being asked.
-- **Intermediate.** Sportz shares one HTTP server between Express and `ws` via an `upgrade` listener. Clients subscribe to a match "room"; the server broadcasts only to that room's subscribers.
+- **Intermediate.** Sportz shares one HTTP server between Express and `ws` via an `upgrade` listener. Broadcast scope follows visibility: `commentary` goes to a match's room; `match_created` and `score_update` go to **all** clients (they change the card shown in every grid). See [ADR-010](/decisions).
 - **Senior.** Why not SSE or polling? SSE is one-way (no client→server subscribe); polling is high-latency and wasteful. We hand-rolled rooms/heartbeat/reconnect instead of Socket.IO to keep the dependency surface small — accepting that we own that code. (See [ADR-002](/decisions).)
 - **Staff.** The subscription registry is in-process memory. At multi-instance scale a client on instance A misses events from instance B; you need a Redis pub/sub backbone. Know *when* that becomes mandatory (horizontal scaling) vs premature ([System Architecture](/architecture/system)).
 
