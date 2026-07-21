@@ -52,12 +52,12 @@ This section teaches the technologies *through* Sportz. Each tech is leveled: **
 
 ---
 
-## Observability (Sentry / PostHog / New Relic)
+## Observability (New Relic / PostHog)
 
-- **Beginner.** Tools that tell you, respectively, *what broke*, *what users did*, and *how fast it ran*.
-- **Intermediate.** All three are wired into the frontend as providers; New Relic is lazy-loaded after hydration so it doesn't hurt the metric it measures.
-- **Senior.** Three pillars — logs, metrics, traces. Sportz has logs (Winston) and frontend RUM wired; backend metrics/tracing are gaps. ([Observability](/operations/observability).)
-- **Staff.** OpenTelemetry as the vendor-neutral path — one trace from browser click → Express route → Neon query. Knowing what to measure, thresholds, and escalation.
+- **Beginner.** New Relic tells you *is it healthy, how fast* (errors, performance, traces); PostHog tells you *what are users doing* (analytics, funnels).
+- **Intermediate.** New Relic's Node agent auto-instruments `express`/`pg`/`http` with no manual instrumentation; on the frontend it's lazy-loaded after hydration so it doesn't hurt the LCP metric it measures. PostHog is wired on both sides — `posthog-js` (frontend autocapture + custom events) and `posthog-node` (backend business events).
+- **Senior.** Three pillars — logs, metrics, traces. Sportz now has all three on the backend (Winston + New Relic APM); frontend RUM/traces are wired but need Vercel env vars to activate. ([Observability](/operations/observability).)
+- **Staff.** Why New Relic instead of OpenTelemetry+Sentry — vendor lock-in traded for one connected trace across frontend and backend with no collector to run ([ADR-013](/decisions)). Knowing what to measure, thresholds, and escalation once real traffic exists.
 
 ---
 

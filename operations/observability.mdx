@@ -1,6 +1,6 @@
 ---
 title: "Observability"
-description: "What's instrumented, what's wired-but-inactive, and what's not built yet."
+description: "What's instrumented, what's wired-but-pending-activation, and what's not built yet."
 ---
 
 Observability rests on three pillars — **logs** (what happened), **metrics** (how it's performing), **traces** (where a request went). Here is Sportz's honest coverage of each.
@@ -9,46 +9,62 @@ Observability rests on three pillars — **logs** (what happened), **metrics** (
 
 | Pillar | Backend | Frontend |
 |---|---|---|
-| **Logs** | ✅ Winston | 🟡 Sentry (wired, inactive) |
-| **Metrics** | ❌ Not built | 🟡 New Relic Browser / PostHog (wired, inactive) |
-| **Traces** | ❌ Not built | 🟡 New Relic distributed tracing (wired, inactive) |
+| **Logs** | ✅ Winston | ✅ New Relic error tracking (wired; live once deployed) |
+| **Metrics** | ✅ New Relic APM + PostHog | 🟡 New Relic Browser / PostHog (wired, pending Vercel env vars) |
+| **Traces** | ✅ New Relic distributed tracing | 🟡 New Relic distributed tracing (wired, pending activation) |
 
 ## Backend logging — Winston (built)
 
-Winston is the one fully-active piece. The transport strategy is environment-aware:
+Winston is the log-of-record. The transport strategy is environment-aware:
 
 - **Production** → console only. Containers should log to stdout; file logs inside a container are lost on restart and (as [ISSUE-002](/issues) showed) can crash startup on permission errors.
 - **Development** → console + `logs/error.log` + `logs/combined.log`.
 
 HTTP requests are logged via Morgan piped into Winston (`combined` format in prod, `dev` in development).
 
-## Frontend observability — wired but inactive
+## Backend APM — New Relic (built)
 
-Three tools are integrated in `sportz-ui` as provider components, but **inert until their keys are set** in `.env.local`:
+The `newrelic` Node agent auto-instruments `express`, `pg`, and `http` — request timing, DB query performance, error rates, and distributed traces, all without manual instrumentation in route code. See [ADR-013](/decisions) for why New Relic was chosen over an OpenTelemetry+Sentry stack, and the ESM require-order problem its config had to solve (`src/bootstrap.ts`).
 
-- **Sentry** — error tracking with session replay (records 100% of error sessions, 10% otherwise) and source-map upload so stack traces show real TypeScript lines. Three configs (client/server/edge) because each Next.js runtime differs.
-- **PostHog** — product analytics. Custom events already in code: `match_watched` (with sport/teams), `match_closed`, `ws_reconnected`. Manual `$pageview` tracking because App Router's client navigation doesn't trigger PostHog's auto-capture.
-- **New Relic Browser** — Core Web Vitals (LCP/CLS/INP) on real users, AJAX timing, distributed tracing. Lazy-loaded *after* hydration so the monitoring agent doesn't hurt the LCP it measures.
+Env-gated like Arcjet: `NEW_RELIC_LICENSE_KEY` unset → `bootstrap.ts` never imports the agent, the server runs exactly as if it weren't installed.
 
-To activate: fill `NEXT_PUBLIC_SENTRY_DSN`, `NEXT_PUBLIC_POSTHOG_KEY`, and the four `NEXT_PUBLIC_NEW_RELIC_*` values in `.env.local`.
+## Backend product analytics — PostHog (built)
+
+`posthog-node`, env-gated via `POSTHOG_KEY` (`src/posthog.ts`). Two business events captured so far:
+
+- `match_created` — `{ matchId, sport }`, fired in `POST /matches`
+- `score_updated` — `{ matchId, homeScore, awayScore }`, fired in `PATCH /matches/:id/score`
+
+Distinct ID is `'backend'` for both — these are system-generated events (mostly from the `DEMO_MODE` simulator), not tied to a real end user. See [ADR-014](/decisions) for why this stays separate from New Relic rather than folding in.
+
+## Frontend observability — wired, pending activation
+
+Two tools are integrated as provider components in `sportz-ui`, inert until their keys are set on Vercel:
+
+- **New Relic Browser** — Core Web Vitals (LCP/CLS/INP) on real users, AJAX timing, session replay, distributed tracing linked to the backend agent above. Lazy-loaded *after* hydration so the monitoring agent doesn't hurt the LCP it measures.
+- **PostHog** — product analytics: autocapture (clicks, page views), plus custom events `match_watched`, `match_closed`, `ws_reconnected`. Manual `$pageview` tracking because App Router's client navigation doesn't trigger PostHog's default auto-capture.
+
+To activate: set `NEXT_PUBLIC_NEW_RELIC_ACCOUNT_ID`, `NEXT_PUBLIC_NEW_RELIC_AGENT_ID`, `NEXT_PUBLIC_NEW_RELIC_LICENSE_KEY`, `NEXT_PUBLIC_NEW_RELIC_APPLICATION_ID`, `NEXT_PUBLIC_POSTHOG_KEY`, and `NEXT_PUBLIC_POSTHOG_HOST` on Vercel, then redeploy — these are `NEXT_PUBLIC_*` values, baked into the JS bundle at build time, so setting them alone doesn't take effect until the next build.
+
+<Note>
+Sentry was previously wired on the frontend (errors, session replay, source maps) but has been **fully removed** — three config files, the shared config module, and the `withSentryConfig` build wrapper are all gone. New Relic now covers frontend errors as part of the same RUM agent, and the earlier "Sentry + PostHog + New Relic, three lenses" framing no longer applies. See [ADR-013](/decisions).
+</Note>
 
 ## What each tool answers
 
 ```
-Sentry     → "What broke, for whom, what were they doing?"   (errors)
-PostHog    → "What are users actually doing?"                (product analytics)
-New Relic  → "How fast is it, where is it slow?"             (performance)
+New Relic  → "Is it healthy, and how fast?"     (errors, performance, traces)
+PostHog    → "What are users actually doing?"   (product analytics)
 ```
 
-They don't overlap — three lenses on the same system.
+Two lenses, not three — engineering health vs. product behavior. They don't overlap.
 
 ## Not built yet
 
-- **Backend APM** — no New Relic/Datadog agent on the Express app. Route timing, DB query performance, and event-loop health are currently invisible server-side.
-- **OpenTelemetry** — the vendor-neutral path: instrument Express + `pg` once with OTel, export anywhere. Would enable a single trace from *browser click → fetch → Express route → Neon query*. This is the highest-leverage observability addition and is explicitly future work.
 - **Custom WebSocket metrics** — subscriber counts per match, broadcast frequency, fan-out size. The data is in the subscription registry; nothing emits it yet.
-- **Alerting / dashboards / thresholds** — none defined. Would follow once backend metrics exist.
+- **Alerting / dashboards / thresholds** — none defined. Would follow once real (non-demo) traffic makes thresholds meaningful.
+- **OpenTelemetry** — explicitly decided against for now, not deferred-by-accident. See [ADR-013](/decisions): New Relic's own agent covers the same instrumentation surface without a separate SDK, at the cost of vendor lock-in over vendor neutrality.
 
 <Note>
-Honest summary: **logging is solid, error/analytics/RUM are wired on the frontend awaiting keys, and the backend has no metrics or tracing yet.** The OpenTelemetry gap is the one most worth closing next.
+Honest summary: **logging, backend APM, and backend analytics are all live. Frontend RUM and analytics are wired in code but need Vercel env vars set before they report anything.** WebSocket-level metrics and alerting remain the gaps worth closing next.
 </Note>

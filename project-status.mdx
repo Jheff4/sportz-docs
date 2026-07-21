@@ -22,10 +22,11 @@ This page exists so the handbook never lies to you. Documentation that describes
 - **Containerization** — multi-stage backend Dockerfile (dev Neon Local / prod compose); a gated `standalone` Dockerfile for the frontend too
 - **Deploy** — backend on Render (Docker runtime); frontend on **Vercel** (live)
 - **Frontend** — Next.js App Router app: match grid, commentary timeline, dark mode, animations, responsive bottom sheet (with a live scoreboard), modals, skeletons. Plus: per-sport tags + semantic event-type colors, a **score celebration** (sport-ball burst on a score-up in the watched match), an **onboarding tour** ([driver.js](/decisions), run-once + replayable), and a dismissible **demo banner** (simulated-live + cold-start notice). Tooling: ESLint + Prettier + typecheck.
+- **Backend observability** — New Relic APM (errors, traces, DB/route timing) via `newrelic`, and PostHog (`match_created`, `score_updated`) via `posthog-node`. Both env-gated, both live in production. See [ADR-013](/decisions), [ADR-014](/decisions), [Observability](/operations/observability).
 
 ## 🟡 Wired but not yet active
 
-- **Frontend observability** — Sentry, PostHog, and New Relic Browser are all integrated in code, but inert until their keys are filled into `.env.local`. See [Observability](/operations/observability).
+- **Frontend observability** — New Relic Browser and PostHog are integrated in code, but inert until their keys are set on Vercel and the app is redeployed. Sentry was removed entirely ([ADR-013](/decisions)). See [Observability](/operations/observability).
 
 ## ❌ Not built (and this handbook will not pretend otherwise)
 

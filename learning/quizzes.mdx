@@ -117,6 +117,9 @@ Commentary only matters to people watching that match (a room). But the score is
 <Accordion title="What does DEMO_MODE do, and why is it in-process instead of an external script hitting the API?">
 When DEMO_MODE=true the server runs a simulator that keeps live matches and emits commentary/score updates on an interval, so the deployed app is always live for visitors with no external producer. It's in-process — writing to the DB via Drizzle and calling the broadcast functions directly — so there's no HTTP hop and thus no Arcjet to fight (a trusted producer shouldn't face public bot-detection). The honest caveat: co-locating the producer is a demo shortcut; a real pipeline would be a decoupled service/queue. (See ADR-011.)
 </Accordion>
+<Accordion title="Why does the New Relic agent need its own bootstrap.ts entry file instead of just importing it at the top of index.ts?">
+New Relic patches modules to instrument them, so it must load before those modules do. Under CommonJS, `require('newrelic')` as the first line works because requires run in the order written. Under ESM, that guarantee breaks: static imports in a file are evaluated before that file's own body runs, regardless of where they appear in the source — so even a conditional import written above `import express` would lose, because express's module gets evaluated first anyway. bootstrap.ts has no other imports of its own, so its conditional New Relic import is guaranteed to run before it dynamically imports index.ts (and everything index.ts pulls in). (See ADR-013.)
+</Accordion>
 </AccordionGroup>
 
 ## Data & persistence

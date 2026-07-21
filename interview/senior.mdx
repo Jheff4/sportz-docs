@@ -184,13 +184,16 @@ Never committed (.env* gitignored; only .env.*.example tracked). Prod injects vi
 
 <AccordionGroup>
 <Accordion title="What are the three pillars, and where does Sportz stand on each?">
-Logs (what happened), metrics (how it performs), traces (where a request went). Sportz has logs (Winston) fully; frontend RUM/errors/analytics wired (Sentry/PostHog/New Relic, awaiting keys); backend metrics and tracing are gaps. The biggest gap to close is OpenTelemetry on the backend.
+Logs (what happened), metrics (how it performs), traces (where a request went). Backend has all three: Winston for logs, New Relic APM for metrics and traces (auto-instruments express/pg/http). Frontend has the same three via New Relic Browser — wired in code, but pending Vercel env vars before it reports anything. PostHog covers a separate, fourth concern — product analytics — not one of the three pillars.
 </Accordion>
 <Accordion title="Why is New Relic lazy-loaded after hydration?">
 A performance-monitoring agent loaded synchronously in `<head>` blocks rendering and hurts the very LCP it measures. Loading it after the page is interactive avoids skewing (and degrading) the metric.
 </Accordion>
 <Accordion title="Why does PostHog need manual $pageview tracking here?">
 App Router navigations update the URL via the History API without a full page load, which PostHog's auto-capture misses. A usePathname effect fires $pageview on every route change so analytics aren't undercounted.
+</Accordion>
+<Accordion title="The backend uses New Relic, not OpenTelemetry. Why?">
+New Relic's Node agent auto-instruments express/pg/http itself — no separate OTel SDK or collector needed. The original plan was OTel feeding Sentry (Sentry v8+ is built on OTel), but once New Relic replaced Sentry, that instrumentation layer became redundant: New Relic does its own module-patching. Tradeoff: vendor lock-in over vendor neutrality, bought back by one connected trace (browser → backend) with zero extra infrastructure ([ADR-013](/decisions)).
 </Accordion>
 </AccordionGroup>
 

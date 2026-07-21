@@ -240,3 +240,8 @@ The HTTP path catches Arcjet errors and returns `503` (fails closed).
 `main` requires the CI checks **and** a PR (admin bypass off); production deploys from `main`.
 
 - **Why.** Running CI ≠ enforcing it — an unprotected branch can merge red. With Git-integration CD (Vercel), the platform deploys whatever lands on `main` regardless of your CI, so the *branch* is where you gate: protect `main` → only green code merges → production is gated. PR previews stay ungated on purpose ([DevOps](/operations/devops)).
+
+### An import-free bootstrap file, when something must load first under ESM
+`src/bootstrap.ts` conditionally imports the New Relic agent, then dynamically imports `index.ts` — and has no other imports of its own.
+
+- **Why.** A tool that patches modules (New Relic, in this case) has to load before anything else does. Under CommonJS, `require('newrelic')` as the first line of the entry file guarantees that. Under ESM, it doesn't: static imports in a file are evaluated before that file's own body runs, in source order across the module graph — so a conditional `if (key) await import('newrelic')` written *above* `import express from 'express'` in the same file still loses, because `express`'s module gets evaluated first regardless of where the conditional sits in the text. The fix is a separate file with nothing else in it to hoist ahead of the conditional — order is only guaranteed within a file that has no competing imports ([ADR-013](/decisions)).

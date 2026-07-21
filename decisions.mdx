@@ -177,3 +177,33 @@ Each record follows the same shape: **Context → Decision → Alternatives → 
 **Tradeoffs.** One small dependency + overriding its default popover CSS, in exchange for robust positioning we don't maintain. Note the important interaction with tests → see the guard in [Testing](/operations/testing).
 
 **Revisit when.** If the tour needs branching/analytics/multi-page flows, a heavier tour framework may earn its weight.
+
+---
+
+## ADR-013 — New Relic for backend APM; no OpenTelemetry layer
+
+**Context.** The backend had zero error/performance visibility server-side (see the earlier gap noted in [Observability](/operations/observability)). The original plan was OpenTelemetry instrumentation feeding Sentry, since Sentry's Node SDK (v8+) is built directly on OTel. That plan changed: New Relic was chosen instead, and Sentry was removed from the frontend entirely (it had been wired-but-inactive there).
+
+**Decision.** Install `newrelic` (the Node APM agent) on the backend. It auto-instruments `express`, `pg`, and `http` without any OTel SDK in between — New Relic's agent does its own module-patching, the same class of mechanism OTel's auto-instrumentation packages use, just vendor-specific instead of vendor-neutral. Config lives entirely in environment variables (`NEW_RELIC_LICENSE_KEY`, `NEW_RELIC_APP_NAME`), read by `newrelic.cjs` — the agent stays a no-op with no key set, matching the [Arcjet env-gate pattern](/architecture/backend).
+
+**The ESM wrinkle.** New Relic's agent must load before anything else does, so it can patch modules before they're required elsewhere. Under ESM, a conditional `if (key) await import('newrelic')` placed inside `index.ts` doesn't guarantee that — static imports in the same file are evaluated before the file's own body runs, regardless of source order, so `express` would already be loaded by the time the conditional ran. The fix: `src/bootstrap.ts`, a file with **no other imports**, does the conditional New Relic import and then dynamically imports `./index.js`. `package.json` (`dev`/`start`) and the Dockerfile now point at `bootstrap.ts`/`bootstrap.js` instead of `index.ts`/`index.js`.
+
+**Alternatives.** OpenTelemetry → Sentry (the original plan; rejected once New Relic was preferred — running OTel-instrumented traces into New Relic *and* keeping Sentry for frontend errors would mean two separate APM/error vendors on one small system, no unified trace, no reason not to consolidate). Running New Relic backend APM *alongside* Sentry frontend errors (rejected for the same reason — no linked trace between a browser session and its backend request, since they'd live in different vendors).
+
+**Tradeoffs.** Losing OpenTelemetry means the app is coupled to New Relic's proprietary instrumentation rather than a vendor-neutral standard — a real cost if ever migrating away. Bought back by simplicity now: no collector to run, no OTel SDK version-matching, and a single vendor gives one connected trace from browser click through backend request (New Relic Browser's `distributed_tracing: { enabled: true }` already carries the trace context into this agent).
+
+**Revisit when.** Multi-vendor requirements emerge (e.g. a client mandates OTel export), or cost/vendor lock-in becomes a real constraint — OTel would be the path back to neutrality.
+
+---
+
+## ADR-014 — PostHog kept as a third, separate pillar (not folded into New Relic)
+
+**Context.** With New Relic covering errors/performance on both frontend and backend, it's fair to ask whether a separate analytics tool is still justified.
+
+**Decision.** Yes — wire `posthog-node` on the backend (env-gated the same way) alongside the frontend's existing `posthog-js`. Backend captures two business events so far: `match_created`, `score_updated` (in [`src/routes/matches.ts`](/architecture/backend)).
+
+**Why they don't overlap.** New Relic answers "is the system healthy" (errors, latency, traces) — an engineering/on-call lens. PostHog answers "what are people doing" (funnels, feature usage, session replay, A/B testing) — a product lens. Business events like `match_created` aren't errors and aren't performance data; they're product signal, and New Relic has no concept for them.
+
+**Tradeoffs.** A third vendor to keep credentials for and a third dashboard to check — accepted because the two tools genuinely answer different questions; collapsing to one would mean losing one of those lenses, not simplifying.
+
+**Revisit when.** If product-analytics needs stay minimal long-term, PostHog's cost/maintenance may not justify itself over New Relic's own basic event tracking — not a concern at current scale.
