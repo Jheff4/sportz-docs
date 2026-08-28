@@ -100,12 +100,6 @@
     "dark": "/logo/dark.svg"
   },
   "navbar": {
-    "links": [
-      {
-        "label": "Live Demo",
-        "href": "https://sportz-ui.vercel.app"
-      }
-    ],
     "primary": {
       "type": "github",
       "href": "https://github.com/Jheff4/sportz-websockets"
