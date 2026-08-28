@@ -1,6 +1,6 @@
 ---
 title: "Testing Strategy"
-description: "What we test, how, and why — 95 Vitest tests across the backend plus a Playwright end-to-end suite on the frontend."
+description: "What we test, how, and why: 95 Vitest tests across the backend plus a Playwright end-to-end suite on the frontend."
 ---
 
 Sportz tests both halves of the system. The **backend** has 95 Vitest tests across three layers; the **frontend** has a Playwright end-to-end suite that drives the real UI in a browser. Each layer answers a different question and runs against a different level of realness.
@@ -14,44 +14,44 @@ Sportz tests both halves of the system. The **backend** has 95 Vitest tests acro
 | **WebSocket** | ~12 | Backend | A **real** WS server + real client sockets | "Does the live protocol behave correctly?" |
 | **End-to-end** | ~8 | Frontend | The real Next.js UI in a browser (Chromium) | "Does the user see and do the right thing?" |
 
-## Unit tests — validation & status logic
+## Unit tests: validation & status logic
 
-The pure functions: `getMatchStatus` (derives scheduled/live/finished from timestamps, including boundary cases like "now exactly equals start") and the Zod schemas (valid + invalid inputs, coercion, the `endTime > startTime` rule). No DB, no network — fast and deterministic.
+The pure functions: `getMatchStatus` (derives scheduled/live/finished from timestamps, including boundary cases like "now exactly equals start") and the Zod schemas (valid + invalid inputs, coercion, the `endTime > startTime` rule). No DB, no network: fast and deterministic.
 
-## Integration tests — routes against real Postgres
+## Integration tests: routes against real Postgres
 
 These drive the real Express app with **Supertest**, against a **real** database (not a mock). Mocking the DB would mean testing the mock, not the SQL.
 
 - `createApp()` is built *without* `server.listen()` so Supertest can drive it in-memory (see [Backend](/architecture/backend)).
 - `resetDb()` runs `TRUNCATE ... RESTART IDENTITY CASCADE` in a `beforeEach`, so every test gets a clean, deterministic database with IDs starting at 1.
-- The WS broadcast functions are replaced with `vi.fn()` spies to assert the route *calls* them correctly — without needing a live socket.
+- The WS broadcast functions are replaced with `vi.fn()` spies to assert the route *calls* them correctly, without needing a live socket.
 
 **The one thing mocked:** Arcjet. Its `protect()` makes a real network call; a setup file (`tests/setup/mock-arcjet.ts`) mocks it to always allow (and sets test env vars before any import, because `arcjet.ts` throws at import time if `ARCJET_KEY` is missing).
 
-## WebSocket tests — real socket pairs
+## WebSocket tests: real socket pairs
 
 These start a real `http.Server` on port 0 (OS-assigned free port), attach the real WS server, and connect real `ws` clients. They verify: welcome on connect, subscribe/unsubscribe confirmations, malformed-JSON handling, **room-scoped broadcast** (subscribers of match 1 get it, subscribers of match 2 and unsubscribed clients don't), and the Arcjet deny path (overriding the global mock for one call).
 
-Two real bugs were found *by writing these tests* — a message race and a missing `close()` causing hung timers. Both are post-mortemed in [Issues](/issues).
+Two real bugs were found *by writing these tests*: a message race and a missing `close()` causing hung timers. Both are post-mortemed in [Issues](/issues).
 
-## End-to-end tests — Playwright against the real UI
+## End-to-end tests: Playwright against the real UI
 
-These drive the actual `sportz-ui` in a real Chromium browser: load the page, click "Watch Live," assert the commentary panel fills, toggle dark mode, page through matches, scan for accessibility violations. They verify the thing the backend tests can't — that a **user** sees and does the right thing.
+These drive the actual `sportz-ui` in a real Chromium browser: load the page, click "Watch Live," assert the commentary panel fills, toggle dark mode, page through matches, scan for accessibility violations. They verify the thing the backend tests can't: that a **user** sees and does the right thing.
 
-- **Mocked at the network boundary.** REST is stubbed with `page.route`, the WebSocket with `page.routeWebSocket`. List/scale data is generated from a template (`Array.from({ length: 8 }, ...)`). So the suite is deterministic and offline — it never depends on the cold free-tier backend, whose latency would otherwise silently change what renders.
-- **Runs against a production build, on its own port.** `webServer` runs `npm run build && npm run start -- -p 3100` with `reuseExistingServer: false`. `next dev` compiles routes on first request, so under `fullyParallel` several cold compiles serialize and blow past the 30s test timeout — producing flaky failures that *shift between runs* and vanish when you run files individually. A prod build serves pre-compiled routes instantly (reliable in parallel) and is the exact build CI and Vercel ship. The dedicated port (separate from `next dev`'s 3000) lets the dev server and test server coexist with no collision.
-- **Accessibility is part of the suite.** `@axe-core/playwright` scans the settled page (after the entry animation reaches `opacity: 1`, to avoid mid-animation false positives) for `wcag2a`/`wcag2aa` violations. Writing this caught two real contrast bugs — a theme-token that wasn't theme-aware and a status pill that broke the established `-700`-on-`-50` pattern (see [Issues](/issues)).
-- **First-run UI is kept out of the way.** The onboarding tour auto-opens on a first visit — and Playwright starts each spec with **fresh `localStorage`**, so it would pop up in every test, cover the page with an overlay, and break the a11y scan + Watch-Live clicks. Two guards: the app skips the auto-tour under automation (`navigator.webdriver`), and the mock setup pre-sets the "seen" flag via `page.addInitScript` (deterministic belt-and-suspenders). The lesson generalizes: **any first-run popup/overlay must be suppressible in automated runs.**
+- **Mocked at the network boundary.** REST is stubbed with `page.route`, the WebSocket with `page.routeWebSocket`. List/scale data is generated from a template (`Array.from({ length: 8 }, ...)`). So the suite is deterministic and offline: it never depends on the cold free-tier backend, whose latency would otherwise silently change what renders.
+- **Runs against a production build, on its own port.** `webServer` runs `npm run build && npm run start -- -p 3100` with `reuseExistingServer: false`. `next dev` compiles routes on first request, so under `fullyParallel` several cold compiles serialize and blow past the 30s test timeout, producing flaky failures that *shift between runs* and vanish when you run files individually. A prod build serves pre-compiled routes instantly (reliable in parallel) and is the exact build CI and Vercel ship. The dedicated port (separate from `next dev`'s 3000) lets the dev server and test server coexist with no collision.
+- **Accessibility is part of the suite.** `@axe-core/playwright` scans the settled page (after the entry animation reaches `opacity: 1`, to avoid mid-animation false positives) for `wcag2a`/`wcag2aa` violations. Writing this caught two real contrast bugs: a theme-token that wasn't theme-aware and a status pill that broke the established `-700`-on-`-50` pattern (see [Issues](/issues)).
+- **First-run UI is kept out of the way.** The onboarding tour auto-opens on a first visit, and Playwright starts each spec with **fresh `localStorage`**, so it would pop up in every test, cover the page with an overlay, and break the a11y scan + Watch-Live clicks. Two guards: the app skips the auto-tour under automation (`navigator.webdriver`), and the mock setup pre-sets the "seen" flag via `page.addInitScript` (deterministic belt-and-suspenders). The lesson generalizes: **any first-run popup/overlay must be suppressible in automated runs.**
 
 The diagnostic lesson worth keeping: failures that **move between runs, pass individually, and are all timeouts** point at an environment/concurrency problem, not broken test logic.
 
-## Deployed smoke — the live stack (post-deploy)
+## Deployed smoke: the live stack (post-deploy)
 
-One spec (`e2e/smoke.deployed.spec.ts`, tagged `@deployed`) runs against the **real** deployed stack — the Vercel frontend talking to the Render backend, **no mocks**. It answers the one question mocking can't: *is the deployed system actually wired together?* Four read-only checks: the app loads → a real match renders (REST + CORS + baked API URL) → the WebSocket connects (the `wss://` upgrade through Render's proxy) → Watch Live opens the commentary panel.
+One spec (`e2e/smoke.deployed.spec.ts`, tagged `@deployed`) runs against the **real** deployed stack: the Vercel frontend talking to the Render backend, **no mocks**. It answers the one question mocking can't: *is the deployed system actually wired together?* Four read-only checks: the app loads → a real match renders (REST + CORS + baked API URL) → the WebSocket connects (the `wss://` upgrade through Render's proxy) → Watch Live opens the commentary panel.
 
 - **It's the top rung of the realness ladder** (mocked → … → deployed). Each rung answers its own question; we don't make one tier carry two jobs.
-- **Read-only and presence-based.** It never mutates production and never asserts exact data (real data changes) — only that things are *present* and *connected*. Generous timeouts absorb Render's free-tier cold start.
-- **Excluded from CI and the normal suite.** `npm run test:e2e` uses `--grep-invert @deployed`; the deployed spec runs only via `npm run test:e2e:deployed` (which sets `PLAYWRIGHT_NO_SERVER=1` + `PLAYWRIGHT_BASE_URL`). It's a *post-deploy* check, not a per-push gate — it hits live prod and depends on a cold server. Automating it after a Vercel deploy is a documented next step ([DevOps](/operations/devops)).
+- **Read-only and presence-based.** It never mutates production and never asserts exact data (real data changes); it only checks that things are *present* and *connected*. Generous timeouts absorb Render's free-tier cold start.
+- **Excluded from CI and the normal suite.** `npm run test:e2e` uses `--grep-invert @deployed`; the deployed spec runs only via `npm run test:e2e:deployed` (which sets `PLAYWRIGHT_NO_SERVER=1` + `PLAYWRIGHT_BASE_URL`). It's a *post-deploy* check, not a per-push gate: it hits live prod and depends on a cold server. Automating it after a Vercel deploy is a documented next step ([DevOps](/operations/devops)).
 
 ## Running the tests
 
@@ -77,10 +77,10 @@ npm run test:e2e:ui       # Playwright UI mode, for inner-loop debugging
 npm run test:e2e:deployed # post-deploy smoke vs the LIVE Vercel + Render stack
 ```
 
-CI runs the backend suite against a `postgres:16-alpine` **service container** — fast, free, deterministic, and identical to the local throwaway DB. See [DevOps](/operations/devops).
+CI runs the backend suite against a `postgres:16-alpine` **service container**: fast, free, deterministic, and identical to the local throwaway DB. See [DevOps](/operations/devops).
 
 ## Not yet built
 
 - **Contract testing** between frontend and backend types.
-- **Load testing** (k6/Artillery) of the WS server under thousands of concurrent subscribers — relevant before any real scale.
-- **Visual regression** — relevant once the UI stabilizes.
+- **Load testing** (k6/Artillery) of the WS server under thousands of concurrent subscribers, relevant before any real scale.
+- **Visual regression**, relevant once the UI stabilizes.

@@ -1,11 +1,11 @@
 ---
 title: "System Architecture (C4)"
-description: "The Sportz system at four levels of zoom — context, containers, components, and code."
+description: "The Sportz system at four levels of zoom: context, containers, components, and code."
 ---
 
 We describe the architecture using the [C4 model](https://c4model.com/): four levels of zoom, from "who uses it" down to "what the code does." Each level answers a different question for a different reader.
 
-## Level 1 — System Context
+## Level 1: System Context
 
 *Who and what interacts with Sportz?*
 
@@ -23,9 +23,9 @@ flowchart TB
   sportz -->|"protect() each request"| arcjet
 ```
 
-There is no authentication layer — the "operator" is anyone with API access. That is a deliberate scope decision for a demo platform; see [Project Status](/project-status).
+There is no authentication layer: the "operator" is anyone with API access. That is a deliberate scope decision for a demo platform; see [Project Status](/project-status).
 
-## Level 2 — Containers
+## Level 2: Containers
 
 *What are the deployable units, and how do they talk?*
 
@@ -46,7 +46,7 @@ flowchart LR
 
 The single most important structural fact: **REST and WebSocket share one HTTP server.** Express handles normal requests; an `upgrade` listener intercepts `/ws` connections before they reach Express and hands them to the `ws` server. One process, one port, one deployable container.
 
-## Level 3 — Components (Backend)
+## Level 3: Components (Backend)
 
 *Inside the `sportz` container, what are the pieces?*
 
@@ -72,7 +72,7 @@ flowchart TB
 
 The broadcast functions are created inside `attachWebSocketServer()` and injected onto `app.locals`, so the REST routes can trigger a WebSocket broadcast without importing the WS module directly. This is the seam that connects "data was written" to "tell the clients."
 
-## Level 4 — Code
+## Level 4: Code
 
 *The seam, in actual code.* When a commentary event is posted:
 
@@ -98,7 +98,7 @@ function broadcastToMatch(matchId: number, payload: WsPayload): void {
 }
 ```
 
-## Scalability — what changes as load grows
+## Scalability: what changes as load grows
 
 The architecture above is correct for its current scale. Here is what breaks first, and when:
 
@@ -109,6 +109,6 @@ The architecture above is correct for its current scale. Here is what breaks fir
 | **10k–100k** | — | **In-process broadcast.** You'll want multiple API instances for CPU/availability, and the moment you have two, a client on instance A won't receive an event created on instance B. |
 | **100k+** | — | Lift the existing pub/sub onto a **distributed backbone** (Redis pub/sub or similar): each instance publishes broadcasts to a shared channel, every instance relays to its own local subscribers. This is the first piece of "missing" infrastructure that becomes mandatory. |
 
-Note the nuance: Sportz **already has a pub/sub pattern** (subscribe to match rooms → broadcast to subscribers). What's missing is making that pub/sub **distributed** across instances. The change at 100k+ isn't "add pub/sub" — it's "move the pub/sub you already have from in-process memory to a shared backbone."
+Note the nuance: Sportz **already has a pub/sub pattern** (subscribe to match rooms → broadcast to subscribers). What's missing is making that pub/sub **distributed** across instances. The change at 100k+ isn't "add pub/sub"; it's "move the pub/sub you already have from in-process memory to a shared backbone."
 
-The key insight for an interview or a design review: **the in-process broadcast is not a flaw — it's the right choice until you horizontally scale the API.** Adding a Redis backbone before then is premature complexity.
+The key insight for an interview or a design review: **the in-process broadcast is not a flaw: it's the right choice until you horizontally scale the API.** Adding a Redis backbone before then is premature complexity.

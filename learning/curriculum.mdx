@@ -1,6 +1,6 @@
 ---
 title: "Learning Curriculum"
-description: "Each core technology in Sportz, explained at four levels — beginner to staff."
+description: "Each core technology in Sportz, explained at four levels, beginner to staff."
 ---
 
 This section teaches the technologies *through* Sportz. Each tech is leveled: **Beginner** (what it is), **Intermediate** (how we use it), **Senior** (the tradeoffs), **Staff** (when it breaks and what's next).
@@ -11,7 +11,7 @@ This section teaches the technologies *through* Sportz. Each tech is leveled: **
 
 - **Beginner.** A persistent two-way connection between browser and server. Unlike HTTP (request → response → done), it stays open so the server can push data without being asked.
 - **Intermediate.** Sportz shares one HTTP server between Express and `ws` via an `upgrade` listener. Broadcast scope follows visibility: `commentary` goes to a match's room; `match_created` and `score_update` go to **all** clients (they change the card shown in every grid). See [ADR-010](/decisions).
-- **Senior.** Why not SSE or polling? SSE is one-way (no client→server subscribe); polling is high-latency and wasteful. We hand-rolled rooms/heartbeat/reconnect instead of Socket.IO to keep the dependency surface small — accepting that we own that code. (See [ADR-002](/decisions).)
+- **Senior.** Why not SSE or polling? SSE is one-way (no client→server subscribe); polling is high-latency and wasteful. We hand-rolled rooms/heartbeat/reconnect instead of Socket.IO to keep the dependency surface small, accepting that we own that code. (See [ADR-002](/decisions).)
 - **Staff.** The subscription registry is in-process memory. At multi-instance scale a client on instance A misses events from instance B; you need a Redis pub/sub backbone. Know *when* that becomes mandatory (horizontal scaling) vs premature ([System Architecture](/architecture/system)).
 
 ---
@@ -20,7 +20,7 @@ This section teaches the technologies *through* Sportz. Each tech is leveled: **
 
 - **Beginner.** A library that fetches and caches server data, giving you loading/error states for free.
 - **Intermediate.** Sportz keys queries by `['matches']` and `['commentary', matchId]`. `enabled: matchId !== null` stops the commentary query firing until a match is selected.
-- **Senior.** The key move: WebSocket events write into the *same* cache via `setQueryData`, so REST and live data share one source of truth — no reconciliation layer. Replaced ~50 lines of hand-rolled `useState`/`useEffect`/AbortController per hook. ([ADR-003](/decisions).)
+- **Senior.** The key move: WebSocket events write into the *same* cache via `setQueryData`, so REST and live data share one source of truth, no reconciliation layer. Replaced ~50 lines of hand-rolled `useState`/`useEffect`/AbortController per hook. ([ADR-003](/decisions).)
 - **Staff.** Know the cache-invalidation model and `staleTime` tradeoffs; understand why `refetchOnWindowFocus` is off here (WS already keeps data live, so refocus refetches would be redundant work).
 
 ---
@@ -29,7 +29,7 @@ This section teaches the technologies *through* Sportz. Each tech is leveled: **
 
 - **Beginner.** Packages your app + its environment into one portable image that runs the same everywhere.
 - **Intermediate.** Sportz uses a `builder` stage (compiles TypeScript) and a `runner` stage (ships only `dist/` + prod deps, runs as non-root). The final image has no compiler or source.
-- **Senior.** Why multi-stage? Smaller image, lower attack surface, no devDeps in production. Why a non-root user? Limits blast radius — but it means runtime-written paths need explicit `chown` (a real crash, [ISSUE-002](/issues)).
+- **Senior.** Why multi-stage? Smaller image, lower attack surface, no devDeps in production. Why a non-root user? Limits blast radius, but it means runtime-written paths need explicit `chown` (a real crash, [ISSUE-002](/issues)).
 - **Staff.** Layer caching strategy (copy `package*.json` before source so `npm ci` caches), multi-arch builds (amd64 + arm64), and the dev/prod parity story (Neon Local vs Neon Cloud).
 
 ---
@@ -38,7 +38,7 @@ This section teaches the technologies *through* Sportz. Each tech is leveled: **
 
 - **Beginner.** JavaScript with types checked before the code runs.
 - **Intermediate.** Sportz shares data shapes across backend and frontend; the frontend mirrors Drizzle-inferred types.
-- **Senior.** The payoff is concentrated at boundaries — the WebSocket message protocol and API contracts — where a wrong shape is easy to introduce and expensive to debug at runtime. ([ADR-001](/decisions).)
+- **Senior.** The payoff is concentrated at boundaries (the WebSocket message protocol and API contracts), where a wrong shape is easy to introduce and expensive to debug at runtime. ([ADR-001](/decisions).)
 - **Staff.** Trade strictness against velocity; know where types earn their keep (contracts, public APIs) vs where they're ceremony.
 
 ---
@@ -47,7 +47,7 @@ This section teaches the technologies *through* Sportz. Each tech is leveled: **
 
 - **Beginner.** Drizzle is a type-safe query builder; Neon is serverless Postgres.
 - **Intermediate.** Schema in `schema.ts`, parameterized queries, FK cascade from `commentary` → `matches`. Neon Local forks an ephemeral branch per dev run.
-- **Senior.** The SSL strategy has three cases (Cloud verified / Local self-signed / plain Postgres off) — `ssl: false` ≠ `{ rejectUnauthorized: false }` (a real bug, [ISSUE-003](/issues)). Pooled vs direct connections matter for serverless.
+- **Senior.** The SSL strategy has three cases (Cloud verified / Local self-signed / plain Postgres off): `ssl: false` ≠ `{ rejectUnauthorized: false }` (a real bug, [ISSUE-003](/issues)). Pooled vs direct connections matter for serverless.
 - **Staff.** Connection-pool sizing under serverless, migration strategy in CI/CD, and read-replica/caching decisions at scale.
 
 ---
@@ -55,18 +55,18 @@ This section teaches the technologies *through* Sportz. Each tech is leveled: **
 ## Observability (New Relic / PostHog)
 
 - **Beginner.** New Relic tells you *is it healthy, how fast* (errors, performance, traces); PostHog tells you *what are users doing* (analytics, funnels).
-- **Intermediate.** New Relic's Node agent auto-instruments `express`/`pg`/`http` with no manual instrumentation; on the frontend it's lazy-loaded after hydration so it doesn't hurt the LCP metric it measures. PostHog is wired on both sides — `posthog-js` (frontend autocapture + custom events) and `posthog-node` (backend business events).
-- **Senior.** Three pillars — logs, metrics, traces. Sportz now has all three on the backend (Winston + New Relic APM); frontend RUM/traces are wired but need Vercel env vars to activate. ([Observability](/operations/observability).)
-- **Staff.** Why New Relic instead of OpenTelemetry+Sentry — vendor lock-in traded for one connected trace across frontend and backend with no collector to run ([ADR-013](/decisions)). Knowing what to measure, thresholds, and escalation once real traffic exists.
+- **Intermediate.** New Relic's Node agent auto-instruments `express`/`pg`/`http` with no manual instrumentation; on the frontend it's lazy-loaded after hydration so it doesn't hurt the LCP metric it measures. PostHog is wired on both sides: `posthog-js` (frontend autocapture + custom events) and `posthog-node` (backend business events).
+- **Senior.** Three pillars: logs, metrics, traces. Sportz has all three live on both backend (Winston + New Relic APM) and frontend (New Relic Browser RUM/traces). ([Observability](/operations/observability).)
+- **Staff.** Why New Relic instead of OpenTelemetry+Sentry: vendor lock-in traded for one connected trace across frontend and backend with no collector to run ([ADR-013](/decisions)). Knowing what to measure, thresholds, and escalation once real traffic exists.
 
 ---
 
 ## Testing (Vitest + Playwright)
 
-- **Beginner.** Automated checks that run your code and fail loudly if it misbehaves — so you change things without fear. Vitest tests the backend; Playwright drives the real UI in a browser.
+- **Beginner.** Automated checks that run your code and fail loudly if it misbehaves, so you change things without fear. Vitest tests the backend; Playwright drives the real UI in a browser.
 - **Intermediate.** Sportz layers them: unit (pure logic), integration (routes against a real Postgres), WebSocket (real socket pairs), and frontend E2E (Playwright with REST/WS mocked + an axe a11y scan). ([Testing](/operations/testing).)
-- **Senior.** Mock what you don't own, keep real what you verify (Arcjet mocked, DB real). Prefer user-facing locators and web-first assertions. The E2E suite runs against a **production build** on its own port — `next dev`'s on-demand compilation causes flaky timeouts under parallelism. ([ADR-008](/decisions).)
-- **Staff.** Realness is a ladder (mocked → local backend → deployed smoke) via `PLAYWRIGHT_BASE_URL`; don't make one tier carry two jobs. Treat flakiness as a P-class bug — `retries` absorbs rare true-flake, it doesn't excuse a structural one. Contract testing and visual regression are the next rungs.
+- **Senior.** Mock what you don't own, keep real what you verify (Arcjet mocked, DB real). Prefer user-facing locators and web-first assertions. The E2E suite runs against a **production build** on its own port: `next dev`'s on-demand compilation causes flaky timeouts under parallelism. ([ADR-008](/decisions).)
+- **Staff.** Realness is a ladder (mocked → local backend → deployed smoke) via `PLAYWRIGHT_BASE_URL`; don't make one tier carry two jobs. Treat flakiness as a P-class bug: `retries` absorbs rare true-flake, it doesn't excuse a structural one. Contract testing and visual regression are the next rungs.
 
 ---
 
@@ -75,4 +75,4 @@ This section teaches the technologies *through* Sportz. Each tech is leveled: **
 - **Beginner.** CI = automated checks on your code (lint, types, tests). CD = automatically shipping it. Sportz: backend → Render, frontend → Vercel.
 - **Intermediate.** Push → GitHub Actions run the checks; a platform deploys on merge. The frontend's `NEXT_PUBLIC_*` config is baked at **build** time, so changing it needs a redeploy. ([DevOps](/operations/devops).)
 - **Senior.** "Git push = deploy" is a generic PaaS model (Vercel, Render, Netlify, Heroku), not Vercel-specific. CI and CD are *independent* unless you connect them: **branch protection** on `main` (require checks + PR) is what makes CI gate production, because production deploys from `main`. ([ADR-009](/decisions).)
-- **Staff.** Pick the deploy model per workload (managed PaaS vs own-pipeline/containers) by naming the dominant constraint — convenience vs control/compliance. Keep high-realness checks (deployed smoke) out of the per-push loop; automate them post-deploy. Branch protection turns "we run CI" into "red blocks merge."
+- **Staff.** Pick the deploy model per workload (managed PaaS vs own-pipeline/containers) by naming the dominant constraint: convenience vs control/compliance. Keep high-realness checks (deployed smoke) out of the per-push loop; automate them post-deploy. Branch protection turns "we run CI" into "red blocks merge."

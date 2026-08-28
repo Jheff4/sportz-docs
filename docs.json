@@ -78,6 +78,11 @@
     "global": {
       "anchors": [
         {
+          "anchor": "Live Demo",
+          "href": "https://sportz-ui.vercel.app",
+          "icon": "rocket"
+        },
+        {
           "anchor": "Backend Repo",
           "href": "https://github.com/Jheff4/sportz-websockets",
           "icon": "server"
@@ -95,6 +100,12 @@
     "dark": "/logo/dark.svg"
   },
   "navbar": {
+    "links": [
+      {
+        "label": "Live Demo",
+        "href": "https://sportz-ui.vercel.app"
+      }
+    ],
     "primary": {
       "type": "github",
       "href": "https://github.com/Jheff4/sportz-websockets"

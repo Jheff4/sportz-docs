@@ -1,29 +1,29 @@
 ---
-title: "Engineering Log — Issues & Post-Mortems"
+title: "Engineering Log: Issues & Post-Mortems"
 description: "Every real bug encountered building Sportz, with root cause, investigation, and prevention."
 ---
 
-These are **real** bugs hit while building Sportz — not illustrative examples. Each follows: **Symptom → Investigation → Root Cause → Resolution → Lesson → Prevention.** This is the most valuable page in the handbook, because it documents how the system actually behaves under failure and how those failures were reasoned about.
+These are **real** bugs hit while building Sportz, not illustrative examples. Each follows: **Symptom → Investigation → Root Cause → Resolution → Lesson → Prevention.** This is the most valuable page in the handbook, because it documents how the system actually behaves under failure and how those failures were reasoned about.
 
 ---
 
-## ISSUE-001 — WebSocket tests timed out waiting for a message that had already arrived
+## ISSUE-001: WebSocket tests timed out waiting for a message that had already arrived
 
-**Symptom.** Every WebSocket test failed with `Timed out after 2000ms waiting for a WebSocket message` — including the simplest "connect and expect welcome" test. The full suite hung for 108 seconds.
+**Symptom.** Every WebSocket test failed with `Timed out after 2000ms waiting for a WebSocket message`, including the simplest "connect and expect welcome" test. The full suite hung for 108 seconds.
 
-**Investigation.** Because even the simplest case failed, suspicion fell on the test scaffolding, not the app. A standalone diagnostic script (outside Vitest) connected a real client and logged timestamps: `open at +13ms`, `message at +14ms`. The server *was* sending `welcome` correctly — and `open` and `message` fired **1ms apart**.
+**Investigation.** Because even the simplest case failed, suspicion fell on the test scaffolding, not the app. A standalone diagnostic script (outside Vitest) connected a real client and logged timestamps: `open at +13ms`, `message at +14ms`. The server *was* sending `welcome` correctly, and `open` and `message` fired **1ms apart**.
 
-**Root cause.** A race condition in the test helper. It awaited the `open` event, resolved, and *only then* attached a `message` listener. In that gap between "open resolved" and "listener attached," the server's near-instant `welcome` message arrived — and Node's `EventEmitter` drops events that have no listener yet. The message was gone before anything listened.
+**Root cause.** A race condition in the test helper. It awaited the `open` event, resolved, and *only then* attached a `message` listener. In that gap between "open resolved" and "listener attached," the server's near-instant `welcome` message arrived, and Node's `EventEmitter` drops events that have no listener yet. The message was gone before anything listened.
 
 **Resolution.** Attach the `message` listener **synchronously the instant the socket is constructed**, before any `await`, queuing incoming messages so `nextMessage()` either pops a queued one or waits for the next. After the fix: 12/12 pass in 1.83s.
 
-**Lesson.** This was purely a test artifact — the production frontend attaches `onmessage` synchronously and was never affected. Event-based APIs are race-prone when you `await` between "thing starts" and "I start listening."
+**Lesson.** This was purely a test artifact: the production frontend attaches `onmessage` synchronously and was never affected. Event-based APIs are race-prone when you `await` between "thing starts" and "I start listening."
 
 **Prevention.** Helpers for instant event sources must register listeners before yielding to the event loop. The diagnostic-script technique (reproduce outside the test framework, measure real timings) is the reusable move.
 
 ---
 
-## ISSUE-002 — Container crash-looped on startup with `EACCES: permission denied, mkdir 'logs'`
+## ISSUE-002: Container crash-looped on startup with `EACCES: permission denied, mkdir 'logs'`
 
 **Symptom.** `docker compose up` showed `sportz-app-1` stuck `Restarting`, repeatedly. Logs: `Error: EACCES: permission denied, mkdir 'logs'`.
 
@@ -36,7 +36,7 @@ These are **real** bugs hit while building Sportz — not illustrative examples.
 RUN mkdir -p logs && chown -R sportz:sportz /app
 USER sportz
 ```
-Verified by rebuilding and running standalone — server stayed up, no EACCES.
+Verified by rebuilding and running standalone: server stayed up, no EACCES.
 
 **Lesson.** Running as non-root is correct security, but it means anything the app writes at runtime needs explicit ownership. A deterministic crash + restart policy = infinite loop, which masks the one-line root cause behind noise.
 
@@ -44,13 +44,13 @@ Verified by rebuilding and running standalone — server stayed up, no EACCES.
 
 ---
 
-## ISSUE-003 — Integration tests failed with "The server does not support SSL connections"
+## ISSUE-003: Integration tests failed with "The server does not support SSL connections"
 
 **Symptom.** All 28 integration tests failed at `resetDb()`: `Error: The server does not support SSL connections`.
 
 **Investigation.** The error came from the `pg` driver attempting an SSL handshake against the plain `postgres:16-alpine` test container.
 
-**Root cause.** `db.ts` always passed an `ssl` object to the Pool. Passing *any* `ssl` value — even `{ rejectUnauthorized: false }` — tells `pg` to **attempt** SSL. Neon Cloud and Neon Local both speak SSL, so this was fine in dev/prod. But the vanilla test Postgres has no SSL configured at all and refuses the handshake. The code assumed "we always talk to Neon."
+**Root cause.** `db.ts` always passed an `ssl` object to the Pool. Passing *any* `ssl` value, even `{ rejectUnauthorized: false }`, tells `pg` to **attempt** SSL. Neon Cloud and Neon Local both speak SSL, so this was fine in dev/prod. But the vanilla test Postgres has no SSL configured at all and refuses the handshake. The code assumed "we always talk to Neon."
 
 **Resolution.** Add a third state. `DATABASE_SSL=false` sets `ssl: false` (no handshake attempt) rather than relaxed verification:
 ```ts
@@ -64,27 +64,27 @@ The test setup defaults `DATABASE_SSL=false`. After the fix: 95/95 pass.
 
 ---
 
-## ISSUE-004 — Posting commentary for a non-existent match returns 500, not 404
+## ISSUE-004: Posting commentary for a non-existent match returns 500, not 404
 
 **Symptom.** `POST /matches/999999/commentary` (no such match) returns a generic `500 Failed to create commentary` instead of a `404`.
 
-**Investigation.** The route validates the `matchId` param (a valid positive integer — Zod can't know if it *exists*) and the body, then inserts. The insert hits the database foreign-key constraint (`commentary.matchId → matches.id`), Postgres rejects it (`code: 23503`), and the route's generic `catch` turns it into a `500`.
+**Investigation.** The route validates the `matchId` param (a valid positive integer; Zod can't know if it *exists*) and the body, then inserts. The insert hits the database foreign-key constraint (`commentary.matchId → matches.id`), Postgres rejects it (`code: 23503`), and the route's generic `catch` turns it into a `500`.
 
 **Root cause.** No existence check before insert; the FK violation surfaces as an opaque server error rather than an accurate "not found."
 
-**Resolution (deferred, deliberately).** Not yet fixed. A test pins the **current** `500` behavior with a comment explaining why — so a future fix to `404` is a visible, intentional change (the test must be updated), not a silent regression. Two fix options are documented: an explicit `SELECT` existence check before insert (one extra query, readable) vs. catching Postgres error code `23503` (no extra query, couples to driver internals).
+**Resolution (deferred, deliberately).** Not yet fixed. A test pins the **current** `500` behavior with a comment explaining why, so a future fix to `404` is a visible, intentional change (the test must be updated), not a silent regression. Two fix options are documented: an explicit `SELECT` existence check before insert (one extra query, readable) vs. catching Postgres error code `23503` (no extra query, couples to driver internals).
 
 **Lesson.** Validation that a value is *well-formed* (Zod) is not validation that it *exists* (DB). The gap between them is where misleading error codes hide.
 
-**Prevention.** For any insert referencing a foreign key, decide explicitly how a missing parent should surface — and encode that decision in a test.
+**Prevention.** For any insert referencing a foreign key, decide explicitly how a missing parent should surface, and encode that decision in a test.
 
 ---
 
-## ISSUE-005 — `docker-compose.prod.yml` referenced a build target that didn't exist
+## ISSUE-005: `docker-compose.prod.yml` referenced a build target that didn't exist
 
-**Symptom.** Latent — would error on `docker compose -f docker-compose.prod.yml build` with an unknown-target failure.
+**Symptom.** Latent: would error on `docker compose -f docker-compose.prod.yml build` with an unknown-target failure.
 
-**Investigation.** Cross-checking the Dockerfile stages against both compose files: the Dockerfile defines stages `builder` and `runner`. The dev compose correctly used `target: runner`. The prod compose used `target: production` — a stage that does not exist.
+**Investigation.** Cross-checking the Dockerfile stages against both compose files: the Dockerfile defines stages `builder` and `runner`. The dev compose correctly used `target: runner`. The prod compose used `target: production`, a stage that does not exist.
 
 **Root cause.** Drift between the Dockerfile's stage names and the prod compose's referenced target.
 
@@ -96,11 +96,11 @@ The test setup defaults `DATABASE_SSL=false`. After the fix: 95/95 pass.
 
 ---
 
-## ISSUE-006 — Every `/matches` request returned 500, and the cause was invisible
+## ISSUE-006: Every `/matches` request returned 500, and the cause was invisible
 
 **Symptom.** Running the app locally, `GET /matches` and `POST /matches` returned `500` on every request; the UI showed nothing loading. No error text anywhere.
 
-**Investigation.** The 500s were consistent and fast (~150ms), which pointed at a per-request failure rather than a hang — but the **route's `catch` block swallowed the error** (`catch { res.status(500)... }` with no logging), so there was nothing to go on. Adding `logger.error(..., e)` to the matches route's catches surfaced the real error immediately.
+**Investigation.** The 500s were consistent and fast (~150ms), which pointed at a per-request failure rather than a hang, but the **route's `catch` block swallowed the error** (`catch { res.status(500)... }` with no logging), so there was nothing to go on. Adding `logger.error(..., e)` to the matches route's catches surfaced the real error immediately.
 
 **Root cause.** Two layers: the immediate one was a **database connection failure** (a local Postgres SSL/URL mismatch); the *deeper* one was that the matches route **discarded the error**, making any DB/query problem undiagnosable. The commentary route already logged; matches didn't.
 
@@ -108,7 +108,7 @@ The test setup defaults `DATABASE_SSL=false`. After the fix: 95/95 pass.
 
 **Lesson.** A bare `catch` that returns a generic 500 without logging turns any downstream failure into a black box. Log the error at the boundary even when you return a sanitized message to the client.
 
-**Prevention.** Every route `catch` logs the real error server-side (stdout in prod); the client still gets a generic message. Consistency across routes matters — the gap existed only because one router logged and another didn't.
+**Prevention.** Every route `catch` logs the real error server-side (stdout in prod); the client still gets a generic message. Consistency across routes matters: the gap existed only because one router logged and another didn't.
 
 ---
 

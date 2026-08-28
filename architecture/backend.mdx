@@ -3,7 +3,7 @@ title: "Backend Architecture"
 description: "The Express + WebSocket API: structure, responsibilities, boundaries, and failure modes."
 ---
 
-The backend (`sportz`) is a single Node process. It is intentionally a **monolith** — REST and WebSocket in one deployable — because at current scale that is simpler and cheaper than splitting, and splitting too early is a classic over-engineering trap (see [Project Status](/project-status)).
+The backend (`sportz`) is a single Node process. It is intentionally a **monolith** (REST and WebSocket in one deployable) because at current scale that is simpler and cheaper than splitting, and splitting too early is a classic over-engineering trap (see [Project Status](/project-status)).
 
 ## Folder structure
 
@@ -32,7 +32,7 @@ src/
 
 `createApp()` builds the Express app but does **not** call `listen()`. `index.ts` imports it, creates the HTTP server, attaches the WebSocket layer, and only then listens.
 
-This split exists for **testability**. Supertest drives an Express app object directly, in-memory, without binding a port. If app construction and `server.listen()` lived in the same file, importing it from a test would start a real server as a side effect — and two test files would fight over the port. Separating "build the app" from "run the app" is what makes the entire route layer testable. (This was a real refactor — see [Issues](/issues).)
+This split exists for **testability**. Supertest drives an Express app object directly, in-memory, without binding a port. If app construction and `server.listen()` lived in the same file, importing it from a test would start a real server as a side effect, and two test files would fight over the port. Separating "build the app" from "run the app" is what makes the entire route layer testable. (This was a real refactor; see [Issues](/issues).)
 
 ## Request lifecycle
 
@@ -67,7 +67,7 @@ Note the order: **security first, then validation, then persistence, then broadc
 
 ## The database layer and its SSL strategy
 
-`db.ts` connects via a `pg` Pool wrapped by Drizzle. The non-obvious part is SSL, which has **three** distinct cases — a subtlety that caused a real bug ([Issues](/issues)):
+`db.ts` connects via a `pg` Pool wrapped by Drizzle. The non-obvious part is SSL, which has **three** distinct cases: a subtlety that caused a real bug ([Issues](/issues)):
 
 ```ts
 const sslEnabled = process.env.DATABASE_SSL !== 'false';
@@ -89,17 +89,17 @@ The trap: `{ rejectUnauthorized: false }` still *attempts* SSL. Turning SSL off 
 
 ## Live scores
 
-`PATCH /matches/:id/score` updates the row and calls `broadcastScoreUpdate(match)`, which emits `score_update` to **all** connected clients — not the match's room — because the score is shown on every client's grid card ([ADR-010](/decisions), [Real-Time](/architecture/realtime)). Same injected-seam pattern as the other broadcasts: the route calls `res.app.locals.broadcastScoreUpdate`, wired in `index.ts`.
+`PATCH /matches/:id/score` updates the row and calls `broadcastScoreUpdate(match)`, which emits `score_update` to **all** connected clients, not the match's room, because the score is shown on every client's grid card ([ADR-010](/decisions), [Real-Time](/architecture/realtime)). Same injected-seam pattern as the other broadcasts: the route calls `res.app.locals.broadcastScoreUpdate`, wired in `index.ts`.
 
 ## Demo mode
 
-When `DEMO_MODE=true` (set in `render.yaml`), `index.ts` starts an in-process simulator (`src/demo/`) so the deployed app is always live for visitors. It keeps a few live matches across sports (per-sport *playbooks* with real clubs/players and rule-correct scoring), and on an interval writes commentary/score updates **directly via Drizzle** and calls the broadcast functions **directly** — no HTTP hop, so no Arcjet to fight (a trusted first-party producer). Each event type has **several message templates** and the simulator avoids repeating the exact previous line (`pickMessage`), so distinct events don't read as identical. Match lifecycle (full-time → fresh fixture) keeps scores realistic; pruning bounds the DB. It's a deliberate demo shortcut — a real pipeline would decouple ingestion ([ADR-011](/decisions)).
+When `DEMO_MODE=true` (set in `render.yaml`), `index.ts` starts an in-process simulator (`src/demo/`) so the deployed app is always live for visitors. It keeps a few live matches across sports (per-sport *playbooks* with real clubs/players and rule-correct scoring), and on an interval writes commentary/score updates **directly via Drizzle** and calls the broadcast functions **directly**, with no HTTP hop, so no Arcjet to fight (a trusted first-party producer). Each event type has **several message templates** and the simulator avoids repeating the exact previous line (`pickMessage`), so distinct events don't read as identical. Match lifecycle (full-time → fresh fixture) keeps scores realistic; pruning bounds the DB. It's a deliberate demo shortcut; a real pipeline would decouple ingestion ([ADR-011](/decisions)).
 
 ## Observability wiring
 
-The New Relic agent must load before any other module patches `express`/`pg`, which ESM's import-hoisting defeats if done naively inside `index.ts` — see [ADR-013](/decisions) for why `src/bootstrap.ts` exists as a separate, import-free entry point that conditionally loads `newrelic` first, then hands off to `index.ts`. `package.json` and the Dockerfile both point at `bootstrap.ts`/`bootstrap.js` now, not `index.ts`/`index.js`.
+The New Relic agent must load before any other module patches `express`/`pg`, which ESM's import-hoisting defeats if done naively inside `index.ts`; see [ADR-013](/decisions) for why `src/bootstrap.ts` exists as a separate, import-free entry point that conditionally loads `newrelic` first, then hands off to `index.ts`. `package.json` and the Dockerfile both point at `bootstrap.ts`/`bootstrap.js` now, not `index.ts`/`index.js`.
 
-`src/posthog.ts` follows the same env-gate shape as `src/arcjet.ts` — `posthogKey ? new PostHog(...) : null` — so every `posthog?.capture(...)` call site is a no-op with no key set. Full detail in [Observability](/operations/observability).
+`src/posthog.ts` follows the same env-gate shape as `src/arcjet.ts` (`posthogKey ? new PostHog(...) : null`), so every `posthog?.capture(...)` call site is a no-op with no key set. Full detail in [Observability](/operations/observability).
 
 ## Failure modes
 
@@ -108,5 +108,5 @@ The New Relic agent must load before any other module patches `express`/`pg`, wh
 | DB unreachable | Route's `try/catch` → `500` | Correct, but no retry/circuit-breaker. Fine at this scale. |
 | Invalid input | Zod → `400` with issue details | Good. |
 | Arcjet itself errors | Caught → `503` | Fails closed (denies) on the HTTP path. |
-| Commentary for non-existent match | FK violation → generic `500` | **Known gap** — should be `404`. Documented in [Issues](/issues); a test pins the current behavior so a fix is deliberate. |
+| Commentary for non-existent match | FK violation → generic `500` | **Known gap**: should be `404`. Documented in [Issues](/issues); a test pins the current behavior so a fix is deliberate. |
 | Process receives SIGTERM | Exits immediately | **No graceful shutdown yet.** WS connections drop uncleanly. `attachWebSocketServer` now returns `close()`, which is the building block for a future SIGTERM handler. |

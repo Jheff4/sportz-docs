@@ -7,13 +7,13 @@ Each record follows the same shape: **Context → Decision → Alternatives → 
 
 ---
 
-## ADR-001 — TypeScript everywhere
+## ADR-001: TypeScript everywhere
 
 **Context.** The system spans a Node API and a React frontend that share data shapes (a `Match`, a `Commentary` event).
 
 **Decision.** TypeScript on both sides, with the frontend's `lib/types.ts` mirroring the backend's Drizzle-inferred types.
 
-**Alternatives.** Plain JS (faster to write, no build step) — rejected: the shared data contracts are exactly where type safety pays off, and the WebSocket message protocol is easy to get subtly wrong without types.
+**Alternatives.** Plain JS (faster to write, no build step): rejected, since the shared data contracts are exactly where type safety pays off, and the WebSocket message protocol is easy to get subtly wrong without types.
 
 **Tradeoffs.** A compile step and stricter discipline, in exchange for catching shape mismatches at build time instead of runtime.
 
@@ -21,32 +21,32 @@ Each record follows the same shape: **Context → Decision → Alternatives → 
 
 ---
 
-## ADR-002 — WebSockets for real-time (not SSE or polling)
+## ADR-002: WebSockets for real-time (not SSE or polling)
 
 **Context.** Clients need live scores and commentary with sub-second latency.
 
 **Decision.** Raw `ws` WebSocket server, sharing the Express HTTP server via an `upgrade` listener.
 
 **Alternatives.**
-- **Polling** — simple, but high latency and wasteful at the cadence live sport needs.
-- **Server-Sent Events (SSE)** — one-directional (server→client) only. Sportz needs client→server too (subscribe/unsubscribe to specific matches), so SSE alone doesn't fit without a second channel.
-- **Socket.IO** — batteries-included (rooms, reconnect), but adds a protocol layer and client dependency. We wanted to own the (small) protocol and keep the dependency surface minimal.
+- **Polling**: simple, but high latency and wasteful at the cadence live sport needs.
+- **Server-Sent Events (SSE)**: one-directional (server→client) only. Sportz needs client→server too (subscribe/unsubscribe to specific matches), so SSE alone doesn't fit without a second channel.
+- **Socket.IO**: batteries-included (rooms, reconnect), but adds a protocol layer and client dependency. We wanted to own the (small) protocol and keep the dependency surface minimal.
 
-**Tradeoffs.** We hand-rolled rooms, heartbeat, and reconnect (which Socket.IO gives free) — but the implementation is small, dependency-light, and fully understood. The reconnect/heartbeat logic is documented in [Real-Time](/architecture/realtime).
+**Tradeoffs.** We hand-rolled rooms, heartbeat, and reconnect (which Socket.IO gives free), but the implementation is small, dependency-light, and fully understood. The reconnect/heartbeat logic is documented in [Real-Time](/architecture/realtime).
 
 **Revisit when.** If the protocol grows complex (presence, acks, binary frames), Socket.IO's feature set may justify its weight.
 
 ---
 
-## ADR-003 — TanStack Query for the data layer
+## ADR-003: TanStack Query for the data layer
 
 **Context.** The frontend fetches REST data *and* receives live WS updates for the same entities. Naively these are two separate state systems that must be reconciled.
 
 **Decision.** React Query owns server state. WebSocket events write directly into its cache via `setQueryData`, so REST and WS feed one source of truth.
 
 **Alternatives.**
-- **Manual `useState` + `useEffect` + fetch** — what existed first. Rejected after building it: it reimplements caching, loading/error state, dedup, and AbortController by hand, and still needs a separate reconciliation path for WS events.
-- **SWR** — comparable; React Query's `setQueryData` and `enabled` ergonomics fit the WS-into-cache and "no match selected" cases more cleanly.
+- **Manual `useState` + `useEffect` + fetch**: what existed first. Rejected after building it: it reimplements caching, loading/error state, dedup, and AbortController by hand, and still needs a separate reconciliation path for WS events.
+- **SWR**: comparable; React Query's `setQueryData` and `enabled` ergonomics fit the WS-into-cache and "no match selected" cases more cleanly.
 
 **Tradeoffs.** A dependency and its mental model, in exchange for deleting ~50 lines of hand-rolled fetching per hook and unifying live + fetched data.
 
@@ -54,7 +54,7 @@ Each record follows the same shape: **Context → Decision → Alternatives → 
 
 ---
 
-## ADR-004 — Framer Motion, GPU-only animations
+## ADR-004: Framer Motion, GPU-only animations
 
 **Context.** A live dashboard wants motion (new events sliding in, score flips) without jank during high-frequency updates.
 
@@ -68,7 +68,7 @@ Each record follows the same shape: **Context → Decision → Alternatives → 
 
 ---
 
-## ADR-005 — Docker + Neon Local for dev, Neon Cloud for prod
+## ADR-005: Docker + Neon Local for dev, Neon Cloud for prod
 
 **Context.** Local dev should mirror production (Neon Postgres) without touching the real database.
 
@@ -76,19 +76,19 @@ Each record follows the same shape: **Context → Decision → Alternatives → 
 
 **Alternatives.** Plain local Postgres (doesn't match Neon's behavior/SSL); sharing a cloud dev DB (state bleeds between developers).
 
-**Tradeoffs.** Docker/Neon-Local setup complexity, in exchange for prod-like, disposable, isolated dev databases. The SSL difference between Neon Local (self-signed) and Cloud (valid) drove a real bug — see [Issues](/issues).
+**Tradeoffs.** Docker/Neon-Local setup complexity, in exchange for prod-like, disposable, isolated dev databases. The SSL difference between Neon Local (self-signed) and Cloud (valid) drove a real bug, see [Issues](/issues).
 
 **Revisit when.** Stable.
 
 ---
 
-## ADR-006 — Vitest over Jest
+## ADR-006: Vitest over Jest
 
 **Context.** The codebase is native ESM (`"type": "module"`, NodeNext resolution).
 
 **Decision.** Vitest, with a setup file that mocks Arcjet and sets test env before any import.
 
-**Alternatives.** Jest — its ESM support still needs `--experimental-vm-modules` plus `ts-jest` config plus module mapping. Painful for a pure-ESM project. Vitest is zero-config for this.
+**Alternatives.** Jest: its ESM support still needs `--experimental-vm-modules` plus `ts-jest` config plus module mapping. Painful for a pure-ESM project. Vitest is zero-config for this.
 
 **Tradeoffs.** None meaningful for this project; Vitest is the modern default for ESM + TS.
 
@@ -96,13 +96,13 @@ Each record follows the same shape: **Context → Decision → Alternatives → 
 
 ---
 
-## ADR-007 — Arcjet for security
+## ADR-007: Arcjet for security
 
 **Context.** A public API needs rate limiting and bot protection without building it from scratch.
 
 **Decision.** Arcjet middleware on the HTTP path and on the WS upgrade, with rules for shield, bot detection, and a sliding window.
 
-**Alternatives.** `express-rate-limit` + a separate bot solution + hand-rolled shield rules — more pieces to wire and maintain.
+**Alternatives.** `express-rate-limit` + a separate bot solution + hand-rolled shield rules: more pieces to wire and maintain.
 
 **Tradeoffs.** A third-party dependency and network call per request (mocked in tests so the suite stays fast and offline), in exchange for layered protection out of the box.
 
@@ -110,69 +110,69 @@ Each record follows the same shape: **Context → Decision → Alternatives → 
 
 ---
 
-## ADR-008 — Playwright for frontend E2E, run against a production build
+## ADR-008: Playwright for frontend E2E, run against a production build
 
-**Context.** The Vitest suite proves the backend (API, SQL, sockets) but nothing exercises what a user actually sees in a browser — rendering, interaction, theming, accessibility.
+**Context.** The Vitest suite proves the backend (API, SQL, sockets) but nothing exercises what a user actually sees in a browser: rendering, interaction, theming, accessibility.
 
 **Decision.** Playwright (Chromium) drives the real UI, with REST/WS mocked at the network boundary (`page.route`, `page.routeWebSocket`) and `@axe-core/playwright` scanning for WCAG violations. The `webServer` runs a **production build** (`next build && next start -- -p 3100`, `reuseExistingServer: false`) on a port separate from `next dev`.
 
-**Alternatives.** Cypress (heavier, no native multi-browser, weaker network/WS mocking). Testing against `next dev` (rejected — on-demand route compilation serializes under `fullyParallel` and causes flaky timeouts, and dev mode isn't what ships). Hitting the real backend (rejected — couples tests to a cold, slow, free-tier server, making renders non-deterministic).
+**Alternatives.** Cypress (heavier, no native multi-browser, weaker network/WS mocking). Testing against `next dev` (rejected: on-demand route compilation serializes under `fullyParallel` and causes flaky timeouts, and dev mode isn't what ships). Hitting the real backend (rejected: couples tests to a cold, slow, free-tier server, making renders non-deterministic).
 
-**Tradeoffs.** A ~10–20s production build before the suite (paid once; CI pays it anyway) in exchange for reliable parallelism and parity with what CI/Vercel ship. The dedicated port lets the dev and test servers coexist. Mocking means the suite doesn't catch frontend↔backend contract drift — that's a separate, higher-realness tier ([Testing](/operations/testing)).
+**Tradeoffs.** A ~10–20s production build before the suite (paid once; CI pays it anyway) in exchange for reliable parallelism and parity with what CI/Vercel ship. The dedicated port lets the dev and test servers coexist. Mocking means the suite doesn't catch frontend↔backend contract drift, which is a separate, higher-realness tier ([Testing](/operations/testing)).
 
 **Revisit when.** Add a small real-backend smoke tier (via `PLAYWRIGHT_BASE_URL`) for pre-release; add visual-regression once the UI stabilizes.
 
 ---
 
-## ADR-009 — Frontend on Vercel (with a Docker image kept for learning/own-infra), CI gates production via branch protection
+## ADR-009: Frontend on Vercel (with a Docker image kept for learning/own-infra), CI gates production via branch protection
 
 **Context.** The frontend (`sportz-ui`, Next.js) needs a deploy target and a way to keep production from receiving unverified code.
 
-**Decision.** Deploy to **Vercel** via Git integration (push to `main` → production; PR → preview). Keep a gated `standalone` **Dockerfile** (`DOCKER_BUILD=1`) for own-infra/learning, but Vercel is the live deploy. Two CI workflows (lint+format; typecheck+Playwright e2e) plus **branch protection** on `main` requiring those checks and a PR — so CI effectively gates the production deploy.
+**Decision.** Deploy to **Vercel** via Git integration (push to `main` → production; PR → preview). Keep a gated `standalone` **Dockerfile** (`DOCKER_BUILD=1`) for own-infra/learning, but Vercel is the live deploy. Two CI workflows (lint+format; typecheck+Playwright e2e) plus **branch protection** on `main` requiring those checks and a PR, so CI effectively gates the production deploy.
 
-**Alternatives.** Dockerize the frontend and self-host on Render/Fly (rejected as the *primary* path — re-owns CDN, TLS, image optimization, preview URLs that Vercel manages for a client-rendered app; kept as a learning artifact). Wiring deploy into GitHub Actions via the Vercel CLI (rejected — loses zero-config Git integration; branch protection achieves the gating more simply). Gating on the Vercel check itself (rejected — couples code merges to deploy hiccups; CI checks are the right gate).
+**Alternatives.** Dockerize the frontend and self-host on Render/Fly (rejected as the *primary* path: it re-owns CDN, TLS, image optimization, preview URLs that Vercel manages for a client-rendered app; kept as a learning artifact). Wiring deploy into GitHub Actions via the Vercel CLI (rejected: loses zero-config Git integration; branch protection achieves the gating more simply). Gating on the Vercel check itself (rejected: couples code merges to deploy hiccups; CI checks are the right gate).
 
-**Tradeoffs.** Vercel is a managed dependency and `NEXT_PUBLIC_*` values bake at build (changing one needs a redeploy; `CORS_ORIGIN` on Render must list the Vercel origin). In exchange: managed CDN/edge, image optimization, per-PR previews, near-zero config. Branch protection means no more direct pushes to `main` — all changes flow through PRs.
+**Tradeoffs.** Vercel is a managed dependency and `NEXT_PUBLIC_*` values bake at build (changing one needs a redeploy; `CORS_ORIGIN` on Render must list the Vercel origin). In exchange: managed CDN/edge, image optimization, per-PR previews, near-zero config. Branch protection means no more direct pushes to `main`; all changes flow through PRs.
 
 **Revisit when.** Compliance/data-residency or cost-at-scale demands self-hosting (the Docker image is ready); or previews need backend access (switch `CORS_ORIGIN` to a pattern/function match).
 
 ---
 
-## ADR-010 — Live scores as a broadcast-to-all WebSocket event
+## ADR-010: Live scores as a broadcast-to-all WebSocket event
 
 **Context.** The product promises real-time *scores* as well as commentary, but scores were only settable at match creation. A `PATCH /matches/:id/score` route + a WS message were needed.
 
-**Decision.** `PATCH /matches/:id/score` updates the row and calls `broadcastScoreUpdate(match)`, which emits `score_update` to **all** connected clients — not just subscribers of that match. The client handles it by replacing the match in the `['matches']` React Query cache, so its card re-renders (the `MatchCard` memo comparator already watches `homeScore`/`awayScore`).
+**Decision.** `PATCH /matches/:id/score` updates the row and calls `broadcastScoreUpdate(match)`, which emits `score_update` to **all** connected clients, not just subscribers of that match. The client handles it by replacing the match in the `['matches']` React Query cache, so its card re-renders (the `MatchCard` memo comparator already watches `homeScore`/`awayScore`).
 
-**Alternatives.** Room-scope it like commentary (rejected — the score is shown on the match card in *every* client's grid, not just for people who clicked Watch Live; room-scoping would leave other grids stale). Broadcast only the score delta rather than the whole match (rejected — sending the full row lets the client replace-by-id idempotently, which also de-risks drift).
+**Alternatives.** Room-scope it like commentary (rejected: the score is shown on the match card in *every* client's grid, not just for people who clicked Watch Live; room-scoping would leave other grids stale). Broadcast only the score delta rather than the whole match (rejected: sending the full row lets the client replace-by-id idempotently, which also de-risks drift).
 
 **Tradeoffs.** All-broadcast is marginally more traffic than room-scoping, but scores are low-frequency and the correctness (every grid stays live) is worth it. The whole-match payload is a few bytes more than a delta, bought back by simpler, idempotent client updates.
 
-**Revisit when.** If score updates ever became high-frequency per match, revisit payload size (deltas) — not a concern at this cadence.
+**Revisit when.** If score updates ever became high-frequency per match, revisit payload size (deltas); not a concern at this cadence.
 
 ---
 
-## ADR-011 — DEMO_MODE: an in-process simulator for the live demo
+## ADR-011: DEMO_MODE: an in-process simulator for the live demo
 
 **Context.** The deployed app looks dead to a visitor unless something is continuously producing events. A portfolio demo needs to be "live" for anyone, any time, with no external producer running.
 
 **Decision.** When `DEMO_MODE=true` (set in `render.yaml`), the server runs an **in-process** simulator on boot: it keeps a few live matches across sports (per-sport *playbooks* with real clubs/players and rule-correct scoring), and on an interval writes commentary/score updates **directly via Drizzle** and calls the broadcast functions **directly**. Match lifecycle (full-time → fresh fixture) keeps scores realistic; pruning keeps the demo DB bounded.
 
-**Alternatives.** An external HTTP producer (the earlier `scripts/stream.ts`) — kept during dev, then removed: it duplicated data and had to fight Arcjet (`DRY_RUN`). A cron/worker hitting the API — more infra than a portfolio needs. Seeding static data once — not "live."
+**Alternatives.** An external HTTP producer (the earlier `scripts/stream.ts`), kept during dev, then removed: it duplicated data and had to fight Arcjet (`DRY_RUN`). A cron/worker hitting the API: more infra than a portfolio needs. Seeding static data once: not "live."
 
-**Tradeoffs.** In-process is the simplest thing that keeps the demo alive, and bypassing the HTTP layer legitimately skips Arcjet (a trusted producer shouldn't face public bot-detection). The honest caveat: co-locating the producer in the web server is a **demo shortcut** — a real ingestion pipeline would be a decoupled service/queue with its own service auth. It also writes continuously to the prod DB (mitigated by pruning).
+**Tradeoffs.** In-process is the simplest thing that keeps the demo alive, and bypassing the HTTP layer legitimately skips Arcjet (a trusted producer shouldn't face public bot-detection). The honest caveat: co-locating the producer in the web server is a **demo shortcut**: a real ingestion pipeline would be a decoupled service/queue with its own service auth. It also writes continuously to the prod DB (mitigated by pruning).
 
 **Revisit when.** Real (non-simulated) match data arrives → replace the simulator with a proper decoupled ingestion path; or multi-instance scaling → the pub/sub backbone from [System Architecture](/architecture/system) applies.
 
 ---
 
-## ADR-012 — driver.js for the onboarding tour
+## ADR-012: driver.js for the onboarding tour
 
 **Context.** A recruiter opening the app needs orientation. We wanted a short guided walkthrough (live matches → Watch Live → commentary → status → theme), run once, replayable.
 
 **Decision.** Use **driver.js** (~5kb) for the spotlight + step flow. Steps target **existing selectors** (roles/aria-labels/test-ids) rather than threading `data-tour` attributes through components. It auto-runs once (a `localStorage` flag), is replayable via a header "?" button, filters out steps whose target isn't visible (so mobile skips the desktop-only panel), and is themed to the design tokens (dark-aware).
 
-**Alternatives.** A hand-rolled overlay + tooltip with Framer Motion (rejected as the default — spotlight positioning, resize, and mobile edge-cases are exactly what a small library already solves well; not worth the code). react-joyride (heavier for what we need).
+**Alternatives.** A hand-rolled overlay + tooltip with Framer Motion (rejected as the default: spotlight positioning, resize, and mobile edge-cases are exactly what a small library already solves well; not worth the code). react-joyride (heavier for what we need).
 
 **Tradeoffs.** One small dependency + overriding its default popover CSS, in exchange for robust positioning we don't maintain. Note the important interaction with tests → see the guard in [Testing](/operations/testing).
 
@@ -180,30 +180,30 @@ Each record follows the same shape: **Context → Decision → Alternatives → 
 
 ---
 
-## ADR-013 — New Relic for backend APM; no OpenTelemetry layer
+## ADR-013: New Relic for backend APM; no OpenTelemetry layer
 
 **Context.** The backend had zero error/performance visibility server-side (see the earlier gap noted in [Observability](/operations/observability)). The original plan was OpenTelemetry instrumentation feeding Sentry, since Sentry's Node SDK (v8+) is built directly on OTel. That plan changed: New Relic was chosen instead, and Sentry was removed from the frontend entirely (it had been wired-but-inactive there).
 
-**Decision.** Install `newrelic` (the Node APM agent) on the backend. It auto-instruments `express`, `pg`, and `http` without any OTel SDK in between — New Relic's agent does its own module-patching, the same class of mechanism OTel's auto-instrumentation packages use, just vendor-specific instead of vendor-neutral. Config lives entirely in environment variables (`NEW_RELIC_LICENSE_KEY`, `NEW_RELIC_APP_NAME`), read by `newrelic.cjs` — the agent stays a no-op with no key set, matching the [Arcjet env-gate pattern](/architecture/backend).
+**Decision.** Install `newrelic` (the Node APM agent) on the backend. It auto-instruments `express`, `pg`, and `http` without any OTel SDK in between. New Relic's agent does its own module-patching, the same class of mechanism OTel's auto-instrumentation packages use, just vendor-specific instead of vendor-neutral. Config lives entirely in environment variables (`NEW_RELIC_LICENSE_KEY`, `NEW_RELIC_APP_NAME`), read by `newrelic.cjs`; the agent stays a no-op with no key set, matching the [Arcjet env-gate pattern](/architecture/backend).
 
-**The ESM wrinkle.** New Relic's agent must load before anything else does, so it can patch modules before they're required elsewhere. Under ESM, a conditional `if (key) await import('newrelic')` placed inside `index.ts` doesn't guarantee that — static imports in the same file are evaluated before the file's own body runs, regardless of source order, so `express` would already be loaded by the time the conditional ran. The fix: `src/bootstrap.ts`, a file with **no other imports**, does the conditional New Relic import and then dynamically imports `./index.js`. `package.json` (`dev`/`start`) and the Dockerfile now point at `bootstrap.ts`/`bootstrap.js` instead of `index.ts`/`index.js`.
+**The ESM wrinkle.** New Relic's agent must load before anything else does, so it can patch modules before they're required elsewhere. Under ESM, a conditional `if (key) await import('newrelic')` placed inside `index.ts` doesn't guarantee that: static imports in the same file are evaluated before the file's own body runs, regardless of source order, so `express` would already be loaded by the time the conditional ran. The fix: `src/bootstrap.ts`, a file with **no other imports**, does the conditional New Relic import and then dynamically imports `./index.js`. `package.json` (`dev`/`start`) and the Dockerfile now point at `bootstrap.ts`/`bootstrap.js` instead of `index.ts`/`index.js`.
 
-**Alternatives.** OpenTelemetry → Sentry (the original plan; rejected once New Relic was preferred — running OTel-instrumented traces into New Relic *and* keeping Sentry for frontend errors would mean two separate APM/error vendors on one small system, no unified trace, no reason not to consolidate). Running New Relic backend APM *alongside* Sentry frontend errors (rejected for the same reason — no linked trace between a browser session and its backend request, since they'd live in different vendors).
+**Alternatives.** OpenTelemetry → Sentry (the original plan; rejected once New Relic was preferred, since running OTel-instrumented traces into New Relic *and* keeping Sentry for frontend errors would mean two separate APM/error vendors on one small system, no unified trace, no reason not to consolidate). Running New Relic backend APM *alongside* Sentry frontend errors (rejected for the same reason: no linked trace between a browser session and its backend request, since they'd live in different vendors).
 
-**Tradeoffs.** Losing OpenTelemetry means the app is coupled to New Relic's proprietary instrumentation rather than a vendor-neutral standard — a real cost if ever migrating away. Bought back by simplicity now: no collector to run, no OTel SDK version-matching, and a single vendor gives one connected trace from browser click through backend request (New Relic Browser's `distributed_tracing: { enabled: true }` already carries the trace context into this agent).
+**Tradeoffs.** Losing OpenTelemetry means the app is coupled to New Relic's proprietary instrumentation rather than a vendor-neutral standard, a real cost if ever migrating away. Bought back by simplicity now: no collector to run, no OTel SDK version-matching, and a single vendor gives one connected trace from browser click through backend request (New Relic Browser's `distributed_tracing: { enabled: true }` already carries the trace context into this agent).
 
-**Revisit when.** Multi-vendor requirements emerge (e.g. a client mandates OTel export), or cost/vendor lock-in becomes a real constraint — OTel would be the path back to neutrality.
+**Revisit when.** Multi-vendor requirements emerge (e.g. a client mandates OTel export), or cost/vendor lock-in becomes a real constraint; OTel would be the path back to neutrality.
 
 ---
 
-## ADR-014 — PostHog kept as a third, separate pillar (not folded into New Relic)
+## ADR-014: PostHog kept as a third, separate pillar (not folded into New Relic)
 
 **Context.** With New Relic covering errors/performance on both frontend and backend, it's fair to ask whether a separate analytics tool is still justified.
 
-**Decision.** Yes — wire `posthog-node` on the backend (env-gated the same way) alongside the frontend's existing `posthog-js`. Backend captures two business events so far: `match_created`, `score_updated` (in [`src/routes/matches.ts`](/architecture/backend)).
+**Decision.** Yes: wire `posthog-node` on the backend (env-gated the same way) alongside the frontend's existing `posthog-js`. Backend captures two business events so far: `match_created`, `score_updated` (in [`src/routes/matches.ts`](/architecture/backend)).
 
-**Why they don't overlap.** New Relic answers "is the system healthy" (errors, latency, traces) — an engineering/on-call lens. PostHog answers "what are people doing" (funnels, feature usage, session replay, A/B testing) — a product lens. Business events like `match_created` aren't errors and aren't performance data; they're product signal, and New Relic has no concept for them.
+**Why they don't overlap.** New Relic answers "is the system healthy" (errors, latency, traces), an engineering/on-call lens. PostHog answers "what are people doing" (funnels, feature usage, session replay, A/B testing), a product lens. Business events like `match_created` aren't errors and aren't performance data; they're product signal, and New Relic has no concept for them.
 
-**Tradeoffs.** A third vendor to keep credentials for and a third dashboard to check — accepted because the two tools genuinely answer different questions; collapsing to one would mean losing one of those lenses, not simplifying.
+**Tradeoffs.** A third vendor to keep credentials for and a third dashboard to check, accepted because the two tools genuinely answer different questions; collapsing to one would mean losing one of those lenses, not simplifying.
 
-**Revisit when.** If product-analytics needs stay minimal long-term, PostHog's cost/maintenance may not justify itself over New Relic's own basic event tracking — not a concern at current scale.
+**Revisit when.** If product-analytics needs stay minimal long-term, PostHog's cost/maintenance may not justify itself over New Relic's own basic event tracking; not a concern at current scale.

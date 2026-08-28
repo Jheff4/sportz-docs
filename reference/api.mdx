@@ -11,7 +11,7 @@ Base URL (local): `http://localhost:8000` · WebSocket: `ws://localhost:8000/ws`
 
 Returns matches, most-recent first.
 
-**Query** — `limit` (1–100, default 50). **No `offset`/cursor** — the endpoint only ever returns the most-recent window (the frontend fetches `limit=100` and paginates client-side). Paging past the top 100 would require cursor pagination — see [Frontend](/architecture/frontend). Not built.
+**Query**: `limit` (1–100, default 50). **No `offset`/cursor**: the endpoint only ever returns the most-recent window (the frontend fetches `limit=100` and paginates client-side). Paging past the top 100 would require cursor pagination, see [Frontend](/architecture/frontend). Not built.
 
 ```json
 { "data": [
@@ -25,26 +25,26 @@ Returns matches, most-recent first.
 
 Creates a match. `status` is **derived** from `startTime`/`endTime`, not supplied. Broadcasts `match_created` to all WS clients.
 
-**Body** — `sport`, `homeTeam`, `awayTeam`, `startTime` (ISO), `endTime` (ISO, must be after `startTime`); optional `homeScore`, `awayScore` (default 0). → `201 { data }`, or `400` on invalid input.
+**Body**: `sport`, `homeTeam`, `awayTeam`, `startTime` (ISO), `endTime` (ISO, must be after `startTime`); optional `homeScore`, `awayScore` (default 0). → `201 { data }`, or `400` on invalid input.
 
 ### `PATCH /matches/:id/score`
 
 Sets a match's live score and broadcasts `score_update` to **all** WS clients (scores show on every client's grid card, so it's global, not room-scoped).
 
-**Body** — required `homeScore`, `awayScore` (non-negative ints). → `200 { data }` (the updated match), `400` on invalid id/body, `404` if the match doesn't exist.
+**Body**: required `homeScore`, `awayScore` (non-negative ints). → `200 { data }` (the updated match), `400` on invalid id/body, `404` if the match doesn't exist.
 
 ### `GET /matches/:id/commentary`
 
-Returns a match's commentary, most-recent first. **Query** — `limit` (1–100). → `200 { data }`, `400` on bad id/query.
+Returns a match's commentary, most-recent first. **Query**: `limit` (1–100). → `200 { data }`, `400` on bad id/query.
 
 ### `POST /matches/:id/commentary`
 
 Inserts a commentary event, broadcasts `commentary` to subscribers of that match.
 
-**Body** — required `sequence` (positive int), `eventType`, `message`; optional `minute`, `period`, `actor`, `team`, `tags`, `metadata`. → `201 { data }`, `400` on invalid input.
+**Body**: required `sequence` (positive int), `eventType`, `message`; optional `minute`, `period`, `actor`, `team`, `tags`, `metadata`. → `201 { data }`, `400` on invalid input.
 
 <Warning>
-Posting to a **non-existent** match currently returns `500` (foreign-key violation), not `404`. Known gap — see [ISSUE-004](/issues).
+Posting to a **non-existent** match currently returns `500` (foreign-key violation), not `404`. Known gap, see [ISSUE-004](/issues).
 </Warning>
 
 ## WebSocket protocol
@@ -62,5 +62,5 @@ Connect to `/ws`. Full walkthrough in [Real-Time Deep Dive](/architecture/realti
 | S→C | `{ "type": "error", "message": "Invalid JSON" }` |
 
 <Note>
-This is hand-written from the route code. A future improvement is generating an **OpenAPI spec** from the existing Zod schemas (`zod-to-openapi`), making the validation rules the single source of truth for these docs — and enabling an interactive playground.
+This is hand-written from the route code. A future improvement is generating an **OpenAPI spec** from the existing Zod schemas (`zod-to-openapi`), making the validation rules the single source of truth for these docs and enabling an interactive playground.
 </Note>

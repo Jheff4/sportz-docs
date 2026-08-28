@@ -3,30 +3,27 @@ title: "Project Status & Scope"
 description: "An honest boundary between what Sportz has, what's wired but inactive, and what doesn't exist yet."
 ---
 
-This page exists so the handbook never lies to you. Documentation that describes systems which don't exist is worse than no documentation — it sends maintainers chasing ghosts. Here is the exact line between reality and aspiration.
+This page exists so the handbook never lies to you. Documentation that describes systems which don't exist is worse than no documentation: it sends maintainers chasing ghosts. Here is the exact line between reality and aspiration.
 
 ## ✅ Built and working
 
-- **REST API** — `GET/POST /matches`, `PATCH /matches/:id/score`, `GET/POST /matches/:id/commentary`
-- **WebSocket server** — connect, subscribe/unsubscribe to a match, broadcast match-created, **live score updates**, and commentary events, 30s heartbeat
-- **Live scores** — `PATCH /matches/:id/score` → `score_update` broadcast to all clients; the frontend replaces the match in cache and the card re-renders live. See [ADR-010](/decisions).
-- **Live-feed dedup** — WS cache writes dedup by id, so a live event that's also in the initial REST batch (or delivered twice) won't duplicate; score updates replace the match by id (idempotent).
-- **Demo mode** — `DEMO_MODE=true` runs an in-process multi-sport simulator (real clubs/players, rule-correct scoring, match lifecycle) so the deployed app is always live for visitors. It writes real rows to the DB continuously; **pruning** keeps it bounded (≈last 50 commentary per match, last 8 finished matches — old rows cascade-deleted). See [ADR-011](/decisions).
-- **Database** — Neon Postgres via Drizzle ORM; `matches` and `commentary` tables with a FK cascade
-- **Validation** — every request body/query parsed with Zod
-- **Security middleware** — Arcjet (rate limiting, bot detection, shield) on HTTP and WS upgrade; Helmet headers; CORS
-- **Match status** — derived from `startTime`/`endTime` (scheduled → live → finished)
-- **Tests** — 95 Vitest tests on the backend (unit/integration/WebSocket) **plus** a Playwright end-to-end suite on the frontend (mocked REST + WS, accessibility scan), run against a production build. See [Testing](/operations/testing).
-- **CI/CD (backend)** — three GitHub Actions workflows (lint+format, tests, docker build/push)
-- **CI/CD (frontend)** — two GitHub Actions workflows (lint+format, typecheck+Playwright e2e) + Vercel deploy; `main` branch-protected to require the checks, so CI gates production. See [DevOps](/operations/devops).
-- **Containerization** — multi-stage backend Dockerfile (dev Neon Local / prod compose); a gated `standalone` Dockerfile for the frontend too
-- **Deploy** — backend on Render (Docker runtime); frontend on **Vercel** (live)
-- **Frontend** — Next.js App Router app: match grid, commentary timeline, dark mode, animations, responsive bottom sheet (with a live scoreboard), modals, skeletons. Plus: per-sport tags + semantic event-type colors, a **score celebration** (sport-ball burst on a score-up in the watched match), an **onboarding tour** ([driver.js](/decisions), run-once + replayable), and a dismissible **demo banner** (simulated-live + cold-start notice). Tooling: ESLint + Prettier + typecheck.
-- **Backend observability** — New Relic APM (errors, traces, DB/route timing) via `newrelic`, and PostHog (`match_created`, `score_updated`) via `posthog-node`. Both env-gated, both live in production. See [ADR-013](/decisions), [ADR-014](/decisions), [Observability](/operations/observability).
-
-## 🟡 Wired but not yet active
-
-- **Frontend observability** — New Relic Browser and PostHog are integrated in code, but inert until their keys are set on Vercel and the app is redeployed. Sentry was removed entirely ([ADR-013](/decisions)). See [Observability](/operations/observability).
+- **REST API**: `GET/POST /matches`, `PATCH /matches/:id/score`, `GET/POST /matches/:id/commentary`
+- **WebSocket server**: connect, subscribe/unsubscribe to a match, broadcast match-created, **live score updates**, and commentary events, 30s heartbeat
+- **Live scores**: `PATCH /matches/:id/score` → `score_update` broadcast to all clients; the frontend replaces the match in cache and the card re-renders live. See [ADR-010](/decisions).
+- **Live-feed dedup**: WS cache writes dedup by id, so a live event that's also in the initial REST batch (or delivered twice) won't duplicate; score updates replace the match by id (idempotent).
+- **Demo mode**: `DEMO_MODE=true` runs an in-process multi-sport simulator (real clubs/players, rule-correct scoring, match lifecycle) so the deployed app is always live for visitors. It writes real rows to the DB continuously; **pruning** keeps it bounded (≈last 50 commentary per match, last 8 finished matches, old rows cascade-deleted). See [ADR-011](/decisions).
+- **Database**: Neon Postgres via Drizzle ORM; `matches` and `commentary` tables with a FK cascade
+- **Validation**: every request body/query parsed with Zod
+- **Security middleware**: Arcjet (rate limiting, bot detection, shield) on HTTP and WS upgrade; Helmet headers; CORS
+- **Match status**: derived from `startTime`/`endTime` (scheduled → live → finished)
+- **Tests**: 95 Vitest tests on the backend (unit/integration/WebSocket) **plus** a Playwright end-to-end suite on the frontend (mocked REST + WS, accessibility scan), run against a production build. See [Testing](/operations/testing).
+- **CI/CD (backend)**: three GitHub Actions workflows (lint+format, tests, docker build/push)
+- **CI/CD (frontend)**: two GitHub Actions workflows (lint+format, typecheck+Playwright e2e) + Vercel deploy; `main` branch-protected to require the checks, so CI gates production. See [DevOps](/operations/devops).
+- **Containerization**: multi-stage backend Dockerfile (dev Neon Local / prod compose); a gated `standalone` Dockerfile for the frontend too
+- **Deploy**: backend on Render (Docker runtime); frontend on **Vercel** (live)
+- **Frontend**: Next.js App Router app: match grid, commentary timeline, dark mode, animations, responsive bottom sheet (with a live scoreboard), modals, skeletons. Plus: per-sport tags + semantic event-type colors, a **score celebration** (sport-ball burst on a score-up in the watched match), an **onboarding tour** ([driver.js](/decisions), run-once + replayable), and a dismissible **demo banner** (simulated-live + cold-start notice). Tooling: ESLint + Prettier + typecheck.
+- **Backend observability**: New Relic APM (errors, traces, DB/route timing) via `newrelic`, and PostHog (`match_created`, `score_updated`) via `posthog-node`. Both env-gated, both live in production. See [ADR-013](/decisions), [ADR-014](/decisions), [Observability](/operations/observability).
+- **Frontend observability**: New Relic Browser (RUM, Core Web Vitals, distributed tracing linked to the backend agent) and PostHog (autocapture + custom events), both env-gated, both confirmed live in the deployed Vercel bundle. Sentry was removed entirely ([ADR-013](/decisions)). See [Observability](/operations/observability).
 
 ## ❌ Not built (and this handbook will not pretend otherwise)
 
@@ -37,7 +34,7 @@ These appear in the original handbook brief but **do not exist in Sportz**. They
 | **Authentication** | None | Sportz is a read-heavy public broadcast demo. No user accounts exist. Adding it = an auth provider (e.g. Clerk/Auth.js) + a `users` table + middleware. |
 | **Authorization** | None | No roles, no protected resources. Follows from no auth. |
 | **Redis / caching** | None | React Query caches on the client; the DB is fast enough at current scale. A cache layer is a [scale-stage](/project-status#when-these-become-real) concern, not a today concern. |
-| **Message queue** | None | Broadcasts are synchronous in-process function calls. A queue (e.g. Redis Streams, Kafka) only matters when you have multiple API instances — see below. |
+| **Message queue** | None | Broadcasts are synchronous in-process function calls. A queue (e.g. Redis Streams, Kafka) only matters when you have multiple API instances (see below). |
 | **Microservices** | Monolith | One Express process serves REST + WS. Correct for this scale; splitting would add ops cost for no benefit yet. |
 | **Zustand / Redux** | Not used | State lives in React Query cache + local component state. A global store wasn't needed for one page. |
 | **React Hook Form** | Not used | The UI has no complex forms; it consumes data, it doesn't capture much. |
@@ -45,12 +42,12 @@ These appear in the original handbook brief but **do not exist in Sportz**. They
 
 ## When these become real
 
-The absent items aren't permanent gaps — they're correctly deferred until scale demands them. The [Scalability](/architecture/system) reasoning:
+The absent items aren't permanent gaps; they're correctly deferred until scale demands them. The [Scalability](/architecture/system) reasoning:
 
-- **Multiple API instances** → in-process broadcast breaks (a client connected to instance A won't get an event created on instance B). *That's* when a queue/pub-sub (Redis) becomes necessary — not before.
+- **Multiple API instances** → in-process broadcast breaks (a client connected to instance A won't get an event created on instance B). *That's* when a queue/pub-sub (Redis) becomes necessary, not before.
 - **User accounts / personalization** → auth + authz become necessary.
 - **Read-heavy hot paths** → a cache layer becomes worthwhile, measured first.
 
 <Warning>
-If you are a future maintainer and you find one of the "Not built" items has since been added — update this table. The value of this page is entirely in it staying honest.
+If you are a future maintainer and you find one of the "Not built" items has since been added, update this table. The value of this page is entirely in it staying honest.
 </Warning>
